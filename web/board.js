@@ -250,7 +250,9 @@
       });
     const p10 = c.pct && c.pct['10y'];
     if (p10 !== null && p10 !== undefined) {
-      items.push(`<span class="delta">10 年分位 <b>${p10.toFixed(0)}%</b></span>`);
+      /* 光秃的 98% 会被当成买卖信号：>=80% / <=20% 加一句位置描述，只说位置、不给方向 */
+      const tag = p10 >= 80 ? ' · 历史极值区' : p10 <= 20 ? ' · 历史低位区' : '';
+      items.push(`<span class="delta">10 年分位 <b>${p10.toFixed(0)}%</b>${tag}</span>`);
     }
     return `<div class="chart-stats">
           <span class="v num">${fmtNum(c.value, fmtDigits(c))}</span>

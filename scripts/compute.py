@@ -967,7 +967,6 @@ def main() -> None:
         hero["gold_cny"] = dict(
             value=round(float(gold_cny.iloc[-1]), 1), date=gold_cny.index[-1].strftime("%Y-%m-%d"),
             chg_1d=round(float(gold_cny.pct_change().iloc[-1] * 100), 2),
-            spark=spark_points(gold_cny),
         )
 
     # ---------------- 头图第三卡：核心驱动（从各板块状态条里直接取，口径天然一致）

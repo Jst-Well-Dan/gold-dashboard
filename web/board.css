@@ -90,7 +90,9 @@ h1 {
 
 .hero-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  /* 固定 3 列：不能用 auto-fit——下面的信号条 grid-column:1/-1 会占住所有轨道，
+     导致 auto-fit 无法塌缩空轨道，卡片行右侧就会剩下一大块空白 */
+  grid-template-columns: repeat(3, 1fr);
   gap: 1px;
   margin-top: 30px;
   background: rgba(255, 255, 255, .09);
@@ -411,6 +413,7 @@ footer li { margin-bottom: 5px; }
 /* ------------------------------------------------------------------ 响应 */
 @media (max-width: 900px) {
   .nav .right { display: none; }
+  .hero-stats { grid-template-columns: 1fr; }
   .state-item { border-left: 0; border-top: 1px solid var(--line-soft); }
   .state-item:first-child { border-top: 0; }
   .nav .brand { margin-right: 4px; }

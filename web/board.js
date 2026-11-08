@@ -100,7 +100,6 @@
             <span class="pill ${c.chg_1d > 0 ? 'up' : c.chg_1d < 0 ? 'down' : 'flat'}">${signed(c.chg_1d, '%')}</span>
           </div>
           <div class="big num">${fmtNum(c.value, 1)}<small>元/克</small></div>
-          ${sparkSVG(c.spark)}
           <div class="meta">美元金价 × 美元兑人民币 ÷ 31.1035 · ${c.date}</div>
         </div>`);
     }

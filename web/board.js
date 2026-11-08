@@ -392,7 +392,7 @@
   }
 
   function baseOption(opts) {
-    const { series, dual, log, unit, legend, time, noYGrid, rankValues, rankScope } = opts;
+    const { series, dual, log, unit, units, legend, time, noYGrid, rankValues, rankScope } = opts;
     const o = {
       animationDuration: 500,
       textStyle: { fontFamily: FONT },
@@ -406,6 +406,28 @@
         textStyle: { color: C.ink, fontSize: 12, fontFamily: FONT },
         axisPointer: { type: 'line', lineStyle: { color: C.gold, width: 1, type: 'dashed' } },
         formatter: (p) => rankTip(p, rankValues, unit || '', rankScope),
+      } : units ? {
+        trigger: 'axis',
+        backgroundColor: 'rgba(255,255,255,.97)',
+        borderColor: C.line,
+        borderWidth: 1,
+        padding: [8, 11],
+        textStyle: { color: C.ink, fontSize: 12, fontFamily: FONT },
+        axisPointer: { type: 'line', lineStyle: { color: C.gold, width: 1, type: 'dashed' } },
+        /* 双轴图：每个系列自带单位后缀（左轴万亿 vs 右轴美元/盎司，不可共用一个 unit） */
+        formatter: (params) => {
+          const arr = Array.isArray(params) ? params : [params];
+          if (!arr.length) return '';
+          const head = arr[0].axisValueLabel || arr[0].name || '';
+          const body = arr.map((q) => {
+            const raw = Array.isArray(q.value) ? q.value[1] : q.value;
+            const u = units[q.seriesIndex] || unit || '';
+            const txt = (raw === null || raw === undefined)
+              ? '—' : fmtNum(raw, Math.abs(raw) >= 1000 ? 0 : 2) + u;
+            return `${q.marker || ''}${q.seriesName || ''} <b>${txt}</b>`;
+          }).join('<br/>');
+          return (head ? head + '<br/>' : '') + body;
+        },
       } : {
         trigger: 'axis',
         backgroundColor: 'rgba(255,255,255,.97)',
@@ -905,7 +927,7 @@
           data: timeData(g.points), itemStyle: { color: C.goldBright }, yAxisIndex: 1, lineStyle: { width: 1.6 },
         }),
       ];
-      return baseOption({ series, dual: true, time: true, unit: '' });
+      return baseOption({ series, dual: true, time: true, unit: '', units: [' 万亿美元', ' 美元/盎司'] });
     },
   };
 

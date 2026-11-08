@@ -28,6 +28,7 @@ def build() -> Path:
             .replace("{{PAYLOAD}}", payload_js)
             .replace("{{JS}}", js)
             .replace("{{SOURCES}}", sources)
+            .replace("{{MCAP}}", payload.get("mcap_line", ""))
             .replace("{{GENERATED}}", payload.get("generated_at_local", "")))
 
     DOCS.mkdir(parents=True, exist_ok=True)

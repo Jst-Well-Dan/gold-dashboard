@@ -375,8 +375,10 @@ STATE_DATES = {
     "实际利率": "DFII10", "通胀预期": "T10YIE",
     "投机净多": "GOLD_COT", "均线动量": "GOLD_MA", "黄金波动率": "GVZCLS",
     "黄金 ETF": "GLD",
-    "金价走势": "GOLD", "金银比": "GOLD", "金油比": "GOLD",
+    "金银比": "GOLD", "金油比": "GOLD",
     "上海金溢价": "SHANGHAI_PREMIUM",
+    # 「距历史高点」「周期状态」「本轮累计」「人民币金价」「地缘威胁」的 date
+    # 在构造时直接写入（月度长序列/派生口径，不走指标卡），main() 里不再覆盖
 }
 
 
@@ -571,21 +573,25 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
                         text=f"近 3 月 {ch:+.1f}%，西方机构配置意愿的代理变量"))
     states["risktemperature"] = dict(verdict="观察", points=pts)
 
-    # ---------------- 官方市场
+    # ---------------- 官方市场（首卡从绝对金价换成「距历史高点」：
+    # 绝对价格 Hero 里已有，这里只讲相对位置与比价，避免重复）
     pts = []
     lg = load_long_gold()
-    # 年初至今必须和头图 hero 用同一口径（COMEX 日频），不用月度长序列的 _gold_ytd
-    gd = f.get("GOLD")
-    ytd = None
-    if gd is not None and len(gd):
-        y0 = gd[gd.index.year == gd.index[-1].year]
-        if len(y0):
-            ytd = float(gd.iloc[-1] / y0.iloc[0] * 100 - 100)
     if len(lg) > 2:
-        pts.append(dict(label="金价走势", value=f"${gv('GOLD'):,.0f}" if gv("GOLD") else "",
-                        tone="good",
-                        text=(f"年初至今 {ytd:+.1f}%，" if ytd is not None else "") +
-                        "长历史视角下仍处于 2022 年以来这一轮上行的高位区间"))
+        dd_s = (lg / lg.cummax() - 1) * 100
+        cur_dd = float(dd_s.iloc[-1])
+        peak_str = lg.idxmax().strftime("%Y-%m")
+        dd_date = lg.index[-1].strftime("%Y-%m-%d")
+        if cur_dd > -3:
+            tone, txt = "good", "处于历史高点附近；2022 年以来这轮上行仍在高位区间"
+        elif cur_dd > -20:
+            tone, txt = ("warn",
+                          f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，" +
+                          "2022 年以来这轮上行的首次深度回调，详见「历史洞察 · 回撤图」")
+        else:
+            tone, txt = "bad", f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，已接近熊市阈值"
+        pts.append(dict(label="距历史高点", value=f"{cur_dd:.1f}%", tone=tone, text=txt,
+                        date=dd_date))
     gs = None
     silver = gv("SILVER")
     gold_px = gv("GOLD")
@@ -623,6 +629,65 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
     verdict = "偏利多" if score >= 2 else ("偏利空" if score == 0 else "中性")
     states["officialmarket"] = dict(verdict=verdict, points=pts)
     return states
+
+
+def build_insights_state(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict:
+    """历史洞察的状态条：与 6 个板块同一套 verdict + points 口径。
+
+    verdict 文案必须带利多/利空/中性关键词（前端 verdictTone 只认这几个词）：
+    - 历史高位 → 偏利多 · 历史高位
+    - 牛市中回调 → 中性 · 牛市回调
+    - 熊市段 → 偏利空 · 熊市调整
+    """
+    lg = load_long_gold()
+    legs = bull_bear_payload(lg, BULL_BEAR_THRESHOLD)["legs"]
+    last = legs[-1]
+    n_bull = sum(1 for l in legs if l["kind"] == "bull")
+    n_bear = len(legs) - n_bull
+    dd = float((lg / lg.cummax() - 1).iloc[-1] * 100)
+    month_end = lg.index[-1].strftime("%Y-%m-%d")
+
+    if last["kind"] == "bear":
+        verdict = "偏利空 · 熊市调整"
+    elif dd > -3:
+        verdict = "偏利多 · 历史高位"
+    else:
+        verdict = "中性 · 牛市回调"
+
+    if last["kind"] == "bull":
+        cyc_value = f"第{n_bull}轮牛市 · 进行中"
+    else:
+        cyc_value = f"第{n_bear}轮熊市 · 进行中"
+    pts = [
+        dict(label="周期状态", value=cyc_value,
+             tone="good" if last["kind"] == "bull" else "bad",
+             text=f"{last['start']} → {last['end']} · {last['months']} 个月" +
+                  ("（±20% 折返确认）" if not last.get("ongoing") else ""),
+             date=month_end),
+        dict(label="本轮累计", value=f"{last['cum']:+.0f}%",
+             tone="good" if last["kind"] == "bull" else "bad",
+             text=f"年化 {last['ann']:+.1f}%／年",
+             date=month_end),
+    ]
+    cny = d.get("GOLD_CNY")
+    if cny is not None and len(cny):
+        pts.append(dict(label="人民币金价", value=fmt(float(cny.iloc[-1]), 1),
+                        tone="neutral", text="美元金价 × 汇率 ÷ 31.1035 折算",
+                        date=cny.index[-1].strftime("%Y-%m-%d")))
+    try:
+        gpr = load_series_csv(RAW / "gpr_threat_monthly.csv")
+    except FileNotFoundError:
+        gpr = None
+    if gpr is not None and len(gpr):
+        g = float(gpr.iloc[-1])
+        pts.append(dict(label="地缘威胁", value=f"{g:.0f}",
+                        tone="good" if g > 150 else "neutral",
+                        text=(f"{g:.0f}，高于历史均值 100，避险叙事偏强" if g > 150
+                              else f"{g:.0f}，接近历史均值 100，地缘背景中性"),
+                        date=gpr.index[-1].strftime("%Y-%m-%d")))
+    return dict(
+        subtitle="金价本身的长历史：人民币金价、境内外价差、牛熊周期、回撤与年度涨跌",
+        verdict=verdict, points=pts)
 
 
 # -------------------------------------------------------------------- 图表数据
@@ -896,13 +961,17 @@ def main() -> None:
 
     charts = build_charts(f, d)
 
-    # 状态叙述统一补截至日（前端显示「截至 MM-DD」）
+    # 状态叙述统一补截至日（前端显示「截至 MM-DD」；构造时已自带 date 的不覆盖）
     card_dates = {}
     for lst in cards.values():
         for c in lst:
             card_dates[c["id"]] = c["date"]
+    insights = build_insights_state(f, d)
+    states["insights"] = insights
     for st in states.values():
         for p in st.get("points", []):
+            if "date" in p:
+                continue
             sid = STATE_DATES.get(p.get("label", ""))
             if sid and sid in card_dates:
                 p["date"] = card_dates[sid]
@@ -912,6 +981,10 @@ def main() -> None:
         generated_at_local=datetime.now().strftime("%Y-%m-%d %H:%M"),
         hero=hero,
         sections=sections,
+        insights=insights,
+        mcap_line=(f"地上黄金存量约 {ABOVE_GROUND_TONNES:,} 吨，按现价折合 "
+                   f"{hero['gold']['mcap_trillion']:.1f} 万亿美元（估算，仅作体量对照）"
+                   if hero.get("gold") else ""),
         charts=charts,
         chart_order=[c["id"] for c in CHARTS if c["id"] in charts and c["id"] not in pinned],
         sources=[

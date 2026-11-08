@@ -84,14 +84,6 @@
           <div class="meta">美元金价 × 美元兑人民币 ÷ 31.1035 · ${c.date}</div>
         </div>`);
     }
-    if (h.gold) {
-      cards.push(`
-        <div class="hero-stat">
-          <div class="label"><span>地上黄金存量市值</span><span class="pill flat">估算</span></div>
-          <div class="big num">${fmtNum(h.gold.mcap_trillion, 1)}<small>万亿美元</small></div>
-          <div class="meta">${h.gold.above_ground} × 现价 · 对标比特币与美债体量</div>
-        </div>`);
-    }
     if (h.outlook && h.outlook.items && h.outlook.items.length) {
       const pillCls = { good: 'up', bad: 'down', warn: 'warn', neutral: 'flat' };
       const pills = h.outlook.items
@@ -956,16 +948,38 @@
   const instances = [];
   const instanceById = new Map();
 
-  /* 给「历史洞察」头补编号（与板块标题同一套 01/02/… 体系） */
-  function placeInsights() {
-    const head = document.getElementById('insights');
-    if (!head) return;
+  /* 「历史洞察」与六大板块同一套头：编号 + 标题 + verdict + 状态条。
+     内容来自 B.insights（compute.build_insights_state），锚点 #insights 保持不变。 */
+  function renderInsights() {
+    const box = document.getElementById('insights-block');
+    if (!box || !B.insights) return;
     const item = (ITEMS || []).find((it) => it.type === 'insights');
-    if (item && !head.querySelector('.section-index')) {
-      const badge = el('div', 'section-index', item.no);
-      head.prepend(badge);
-      head.classList.add('has-index');
-    }
+    const no = item ? item.no : '';
+    const ins = B.insights;
+    const tone = verdictTone(ins.verdict);
+    const panel = (ins.points || [])
+      .map(
+        (p) => `
+      <div class="state-item">
+        <div class="k"><span>${p.label}</span>${p.date ? `<span class="asof">截至 ${p.date.slice(5)}</span>` : ''}</div>
+        <div class="v" data-tone="${p.tone || 'neutral'}">${p.value}</div>
+        <div class="t">${p.text}</div>
+      </div>`
+      )
+      .join('');
+    box.innerHTML = `
+      <section class="section" id="insights">
+        <div class="section-head">
+          <div class="section-index">${no}</div>
+          <div class="section-title">
+            <h2>历史洞察</h2>
+            <p>${ins.subtitle || ''}</p>
+          </div>
+          <div class="verdict" data-tone="${tone}"><span class="dot"></span>当前：${ins.verdict || '—'}</div>
+        </div>
+        ${panel ? `<div class="state-panel">${panel}</div>` : ''}
+        <p class="charts-hint">悬停看数值，点右上角 ⤢ 放大，shift + 滚轮缩放</p>
+      </section>`;
   }
 
   /* 指标卡的 hist → ECharts option（与 builders 出来的图同一套坐标系） */
@@ -1152,7 +1166,7 @@
     renderHero();
     renderNav();
     renderSections();
-    placeInsights();     // 先挪位置再初始化图表，避免 canvas 按旧尺寸渲染
+    renderInsights();
     renderCharts();
   }
 

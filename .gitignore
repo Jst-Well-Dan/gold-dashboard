@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.recon/
+.probe/
+.shots/
+data/raw/
+data/board.json

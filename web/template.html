@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>黄金研究看板 · 不预测金价，只帮你看清黄金正在反映什么</title>
+<meta name="description" content="从美元流动性、通胀与增长、财政与信用、机会成本、风险温度、官方市场六个维度组织全球宏观与黄金市场指标，每个维度都配可缩放的 ECharts 走势图与指标分位。" />
+<meta name="color-scheme" content="light" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f1a12'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%23d4a853' stroke-width='2.5'/%3E%3C/svg%3E" />
+<style>{{CSS}}</style>
+</head>
+<body>
+
+<header class="banner">
+  <div class="wrap">
+    <div class="kicker">Gold Research Board</div>
+    <h1>黄金研究看板</h1>
+    <p class="subtitle">
+      不预测金价，只帮你看清黄金正在反映什么。用金价走势、机会成本、美元流动性、通胀与增长、财政与信用、风险温度
+      六个维度，把 40+ 个宏观与市场指标画进可缩放的走势图里。
+    </p>
+    <div class="hero-stats" id="hero-stats"></div>
+  </div>
+</header>
+
+<nav class="nav">
+  <div class="wrap">
+    <span class="brand">黄金<span>看板</span></span>
+    <div class="links" id="nav-links"></div>
+    <span class="right" id="nav-stamp"></span>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div id="sections"></div>
+
+  <div class="charts-head" id="insights">
+    <h2>历史洞察</h2>
+    <p>金价本身的长历史：人民币金价、境内外价差、牛熊周期、回撤与年度涨跌 · 悬停看数值，点右上角 ⤢ 放大，shift + 滚轮缩放</p>
+  </div>
+  <div class="charts" id="chart-grid"></div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <h4>数据来源</h4>
+    <ul>{{SOURCES}}</ul>
+    <h4>更新与口径</h4>
+    <ul>
+      <li>生成时间：{{GENERATED}}（本地时间）</li>
+      <li>更新频率：日频指标每交易日抓取，周频（COT、H.4.1）每周，月频/季频指标随发布更新。</li>
+      <li>所有图的时间轴统一从 1971 年 1 月起（美元与黄金脱钩，此前金本位/布雷顿森林口径不可比）。</li>
+      <li>图头摘要里的 10 年分位数为「最新值在过去 10 年观测值中的位置」，不是预测。</li>
+      <li>人民币金价 = 美元金价 × 美元兑人民币 ÷ 31.1035；上海金溢价对比上金所 Au99.99。</li>
+    </ul>
+    <div class="disclaimer">
+      本看板仅供学习和研究参考，不构成任何投资建议。指标与图表只描述「发生了什么」，
+      不提供买卖信号；黄金投资有风险，决策需自行判断。
+    </div>
+  </div>
+</footer>
+
+<script>{{ECHARTS}}</script>
+<script>window.__BOARD__={{PAYLOAD}};</script>
+<script>{{JS}}</script>
+</body>
+</html>

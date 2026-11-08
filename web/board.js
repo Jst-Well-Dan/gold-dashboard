@@ -283,12 +283,14 @@
   }
 
   /* ----------------------------------------------------------- 板块渲染 */
+  /* 模板里 #section-first / #chart-grid / #sections-rest 本来就是最终顺序
+     （金价走势 → 历史洞察 → 其余板块），JS 只负责填空，不再搬运 DOM */
   function renderSections() {
-    const root = document.getElementById('sections');
-    if (!root) return;
+    const firstBox = document.getElementById('section-first');
+    const restBox = document.getElementById('sections-rest');
+    if (!firstBox || !restBox) return;
     const noOf = new Map(ITEMS.filter((it) => it.type === 'section').map((it) => [it.sec.key, it.no]));
-    root.innerHTML = B.sections
-      .map((s) => {
+    const htmlFor = (s) => {
         const st = s.state || {};
         const tone = verdictTone(st.verdict);
         const panel = (st.points || [])
@@ -316,8 +318,10 @@
           ${panel ? `<div class="state-panel">${panel}</div>` : ''}
           ${body}
         </section>`;
-      })
-      .join('');
+      };
+    const secs = B.sections || [];
+    firstBox.innerHTML = secs.length ? htmlFor(secs[0]) : '';
+    restBox.innerHTML = secs.slice(1).map(htmlFor).join('');
   }
 
   function verdictTone(v) {
@@ -948,14 +952,10 @@
   const instances = [];
   const instanceById = new Map();
 
-  /* 把「历史洞察」整块移到第一个板块之后（tab 顺序第二位） */
+  /* 给「历史洞察」头补编号（与板块标题同一套 01/02/… 体系） */
   function placeInsights() {
-    const first = document.querySelector('#sections .section');
     const head = document.getElementById('insights');
-    const grid = document.getElementById('chart-grid');
-    if (!first || !head || !grid) return;
-    first.after(head);
-    head.after(grid);
+    if (!head) return;
     const item = (ITEMS || []).find((it) => it.type === 'insights');
     if (item && !head.querySelector('.section-index')) {
       const badge = el('div', 'section-index', item.no);

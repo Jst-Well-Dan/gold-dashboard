@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -363,6 +364,22 @@ def build_cards(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, l
 
 
 # -------------------------------------------------------------------- 叙述生成
+def verdict_tone(v: str) -> str:
+    """板块 verdict → 色调：good=对黄金偏多，bad=偏空，warn=需观察，neutral=中性。
+
+    必须与 web/board.js 的 verdictTone() 同步修改（两边各一份，构建时不做校验）。
+    """
+    if not v:
+        return "neutral"
+    if re.search(r"利多|过热|滞胀|衰退", v):
+        return "bad" if v == "过热" else "good"
+    if "利空" in v:
+        return "bad"
+    if re.search(r"中性|—", v):
+        return "neutral"
+    return "warn"
+
+
 def fmt(v: float, nd: int = 1) -> str:
     return f"{v:,.{nd}f}"
 
@@ -830,6 +847,24 @@ def main() -> None:
             value=round(float(gold_cny.iloc[-1]), 1), date=gold_cny.index[-1].strftime("%Y-%m-%d"),
             chg_1d=round(float(gold_cny.pct_change().iloc[-1] * 100), 2),
         )
+
+    # ---------------- 头图综合信号条：六个板块的 verdict 汇总
+    # tone 口径与前端 verdictTone() 保持一致（good=偏多/红，bad=偏空/绿）
+    outlook_items = [dict(key=s["key"], title=s["title"], anchor=s["anchor"],
+                          verdict=s["state"].get("verdict", "—"),
+                          tone=verdict_tone(s["state"].get("verdict", "")))
+                     for s in sections]
+    goods = [i for i in outlook_items if i["tone"] == "good"]
+    bads = [i for i in outlook_items if i["tone"] == "bad"]
+    parts = []
+    if goods:
+        parts.append(f"偏多×{len(goods)}（{'、'.join(i['title'] for i in goods)}）")
+    if bads:
+        parts.append(f"偏空×{len(bads)}（{'、'.join(i['title'] for i in bads)}）")
+    rest = len(outlook_items) - len(goods) - len(bads)
+    if rest:
+        parts.append(f"其余 {rest} 个维度中性或观察")
+    hero["outlook"] = dict(items=outlook_items, summary="；".join(parts) + "。")
 
     charts = build_charts(f, d)
 

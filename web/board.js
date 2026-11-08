@@ -92,6 +92,17 @@
           <div class="meta">${h.gold.above_ground} × 现价 · 对标比特币与美债体量</div>
         </div>`);
     }
+    if (h.outlook && h.outlook.items && h.outlook.items.length) {
+      const pillCls = { good: 'up', bad: 'down', warn: 'warn', neutral: 'flat' };
+      const pills = h.outlook.items
+        .map((it) => `<a class="pill ${pillCls[it.tone] || 'flat'}" href="#${it.anchor}">${it.title} · ${it.verdict}</a>`)
+        .join('');
+      cards.push(`
+        <div class="hero-outlook">
+          <div class="sum">综合：${h.outlook.summary}</div>
+          <div class="pills">${pills}</div>
+        </div>`);
+    }
     root.innerHTML = cards.join('');
   }
 

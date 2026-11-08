@@ -245,6 +245,10 @@ main { padding-bottom: 40px; }
 .state-item .v[data-tone="bad"] { color: var(--down); }
 .state-item .v[data-tone="warn"] { color: var(--warn); }
 
+.state-item .k .asof {
+  font-family: var(--mono); font-size: 10.5px; color: #b3ab99; letter-spacing: 0;
+}
+
 .state-item .t { margin-top: 6px; font-size: 13px; color: var(--ink-2); line-height: 1.6; }
 
 /* ------------------------------------------- 图头摘要（指标卡 → 图卡） */

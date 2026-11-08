@@ -363,6 +363,23 @@ def build_cards(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, l
     return by_section
 
 
+# 状态叙述每条 point 的数据截至日：label → SERIES id。
+# build_states 里 point 只写 label/value/tone/text，main() 用这张表统一补 date，
+# 前端在状态条右上角显示「截至 MM-DD」，跨板块对比时一眼看出时间错位。
+# （宏观象限是合成结论，无单一截至日，故不在表里）
+STATE_DATES = {
+    "金融条件": "NFCI", "广义美元": "DTWEXBGS", "美元/人民币": "DEXCHUS",
+    "核心通胀": "PCE_YOY", "制造业": "IPMAN", "失业率": "UNRATE",
+    "财政压力评分": "FISCAL_STRESS", "付息/收入": "INTEREST_RATIO",
+    "债务/GDP": "GFDEGDQ188S", "赤字/GDP": "FYFSGDA188S", "央行年购金": "CB_GOLD_NET",
+    "实际利率": "DFII10", "通胀预期": "T10YIE",
+    "投机净多": "GOLD_COT", "均线动量": "GOLD_MA", "黄金波动率": "GVZCLS",
+    "黄金 ETF": "GLD",
+    "金价走势": "GOLD", "金银比": "GOLD", "金油比": "GOLD",
+    "上海金溢价": "SHANGHAI_PREMIUM",
+}
+
+
 # -------------------------------------------------------------------- 叙述生成
 def verdict_tone(v: str) -> str:
     """板块 verdict → 色调：good=对黄金偏多，bad=偏空，warn=需观察，neutral=中性。
@@ -417,8 +434,11 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
         pts.append(dict(label="广义美元", value=fmt(dxy, 2), tone=tone, text=txt))
     cny = gv("DEXCHUS")
     if cny is not None:
+        cnyc = card("DEXCHUS")
+        p1y = (cnyc["pct"]["1y"] if cnyc else None) or 100
         pts.append(dict(label="美元/人民币", value=fmt(cny, 3), tone="neutral",
-                        text="汇率是人民币金价的第二驱动，与美元金价叠加"))
+                        text=("处于近 1 年最低，人民币走强会压低人民币金价" if p1y <= 5
+                              else "汇率是人民币金价的第二驱动，与美元金价叠加")))
     bull = sum(1 for p in pts if p["tone"] == "good")
     bear = sum(1 for p in pts if p["tone"] == "bad")
     verdict = "偏利多" if bull > bear else ("偏利空" if bear > bull else "中性")
@@ -554,10 +574,18 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
     # ---------------- 官方市场
     pts = []
     lg = load_long_gold()
+    # 年初至今必须和头图 hero 用同一口径（COMEX 日频），不用月度长序列的 _gold_ytd
+    gd = f.get("GOLD")
+    ytd = None
+    if gd is not None and len(gd):
+        y0 = gd[gd.index.year == gd.index[-1].year]
+        if len(y0):
+            ytd = float(gd.iloc[-1] / y0.iloc[0] * 100 - 100)
     if len(lg) > 2:
         pts.append(dict(label="金价走势", value=f"${gv('GOLD'):,.0f}" if gv("GOLD") else "",
                         tone="good",
-                        text="长历史视角下，金价仍处于 2022 年以来这一轮上行的高位区间"))
+                        text=(f"年初至今 {ytd:+.1f}%，" if ytd is not None else "") +
+                        "长历史视角下仍处于 2022 年以来这一轮上行的高位区间"))
     gs = None
     silver = gv("SILVER")
     gold_px = gv("GOLD")
@@ -867,6 +895,17 @@ def main() -> None:
     hero["outlook"] = dict(items=outlook_items, summary="；".join(parts) + "。")
 
     charts = build_charts(f, d)
+
+    # 状态叙述统一补截至日（前端显示「截至 MM-DD」）
+    card_dates = {}
+    for lst in cards.values():
+        for c in lst:
+            card_dates[c["id"]] = c["date"]
+    for st in states.values():
+        for p in st.get("points", []):
+            sid = STATE_DATES.get(p.get("label", ""))
+            if sid and sid in card_dates:
+                p["date"] = card_dates[sid]
 
     payload = dict(
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

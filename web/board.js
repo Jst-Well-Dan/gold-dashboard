@@ -132,7 +132,11 @@
       .map((it) => `<a href="#${it.anchor}">${it.no} ${it.title}</a>`)
       .join('');
     const stamp = document.getElementById('nav-stamp');
-    if (stamp) stamp.textContent = '更新 ' + B.generated_at_local;
+    if (stamp) {
+      /* 生成时间 + 金价截至日：宏观指标滞后较多，各条的截至日见状态条右上角 */
+      const gd = (B.hero && B.hero.gold && B.hero.gold.date) || '';
+      stamp.textContent = '更新 ' + B.generated_at_local + (gd ? ` · 金价截至 ${gd.slice(5)}` : '');
+    }
   }
 
   /* ------------------------------------------------- 图卡（两种来源） */
@@ -297,7 +301,7 @@
           .map(
             (p) => `
           <div class="state-item">
-            <div class="k"><span>${p.label}</span></div>
+            <div class="k"><span>${p.label}</span>${p.date ? `<span class="asof">截至 ${p.date.slice(5)}</span>` : ''}</div>
             <div class="v" data-tone="${p.tone || 'neutral'}">${p.value}</div>
             <div class="t">${p.text}</div>
           </div>`

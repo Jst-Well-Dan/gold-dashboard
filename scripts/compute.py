@@ -251,6 +251,19 @@ def delta_meta(spec: dict) -> tuple[str, str]:
     return mode, suffix
 
 
+def spark_points(s: pd.Series, days: int = 365, max_n: int = 120) -> list[list]:
+    """Hero 迷你走势线：近 days 天收盘价，等步抽稀到 max_n 个点。
+
+    前端只负责按 viewBox 拉伸画 SVG，不做任何计算。"""
+    s = s.dropna()
+    if not len(s):
+        return []
+    s = s[s.index >= s.index[-1] - pd.Timedelta(days=days)]
+    if len(s) > max_n:
+        s = s.iloc[::int(np.ceil(len(s) / max_n))]
+    return [[t.strftime("%Y-%m-%d"), round(float(v), 1)] for t, v in s.items()]
+
+
 def change_windows(s: pd.Series, freq: str, is_rate: bool) -> list[dict]:
     specs = {
         "d": [("5 日", 5), ("20 日", 20), ("3 月", 91), ("同比", 365)],
@@ -922,6 +935,20 @@ def main() -> None:
             state=states.get(sec["key"], dict(verdict="—", points=[])),
         ))
 
+    # 状态叙述统一补截至日（前端显示「截至 MM-DD」；构造时已自带 date 的不覆盖）
+    # 注意：必须在 hero 之前——hero 第三卡（核心驱动）直接复用这里的 point
+    card_dates = {}
+    for lst in cards.values():
+        for c in lst:
+            card_dates[c["id"]] = c["date"]
+    for st in states.values():
+        for p in st.get("points", []):
+            if "date" in p:
+                continue
+            sid = STATE_DATES.get(p.get("label", ""))
+            if sid and sid in card_dates:
+                p["date"] = card_dates[sid]
+
     gold = f.get("GOLD")
     gold_cny = d.get("GOLD_CNY")
     hero = {}
@@ -931,6 +958,7 @@ def main() -> None:
             chg_1d=round(float(gold.pct_change().iloc[-1] * 100), 2),
             chg_ytd=round(float(gold.iloc[-1] / gold[gold.index.year == gold.index[-1].year].iloc[0] * 100 - 100), 2),
             chg_1y=round(float(gold.iloc[-1] / gold[gold.index <= gold.index[-1] - pd.Timedelta(days=365)].iloc[-1] * 100 - 100), 2),
+            spark=spark_points(gold),
         )
         oz = ABOVE_GROUND_TONNES * TROY_OZ_PER_TONNE
         hero["gold"]["mcap_trillion"] = round(float(gold.iloc[-1] * oz / 1e12), 1)
@@ -939,7 +967,28 @@ def main() -> None:
         hero["gold_cny"] = dict(
             value=round(float(gold_cny.iloc[-1]), 1), date=gold_cny.index[-1].strftime("%Y-%m-%d"),
             chg_1d=round(float(gold_cny.pct_change().iloc[-1] * 100), 2),
+            spark=spark_points(gold_cny),
         )
+
+    # ---------------- 头图第三卡：核心驱动（从各板块状态条里直接取，口径天然一致）
+    def _state_point(section_key: str, label: str) -> dict | None:
+        for p in states.get(section_key, {}).get("points", []):
+            if p.get("label") == label:
+                return p
+        return None
+
+    _drivers = [
+        ("opportunitycost", "实际利率", "实际利率", "#opportunity-cost"),
+        ("fiscalcredit", "财政压力评分", "财政压力", "#fiscal-credit"),
+        ("dollarliquidity", "广义美元", "广义美元", "#dollar-liquidity"),
+    ]
+    hero["drivers"] = []
+    for sec_key, src_label, show_label, anchor in _drivers:
+        p = _state_point(sec_key, src_label)
+        if p:
+            hero["drivers"].append(dict(label=show_label, value=p["value"],
+                                          tone=p.get("tone", "neutral"),
+                                          date=p.get("date", ""), anchor=anchor))
 
     # ---------------- 头图综合信号条：六个板块的 verdict 汇总
     # tone 口径与前端 verdictTone() 保持一致（good=偏多/红，bad=偏空/绿）
@@ -961,20 +1010,8 @@ def main() -> None:
 
     charts = build_charts(f, d)
 
-    # 状态叙述统一补截至日（前端显示「截至 MM-DD」；构造时已自带 date 的不覆盖）
-    card_dates = {}
-    for lst in cards.values():
-        for c in lst:
-            card_dates[c["id"]] = c["date"]
     insights = build_insights_state(f, d)
     states["insights"] = insights
-    for st in states.values():
-        for p in st.get("points", []):
-            if "date" in p:
-                continue
-            sid = STATE_DATES.get(p.get("label", ""))
-            if sid and sid in card_dates:
-                p["date"] = card_dates[sid]
 
     payload = dict(
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

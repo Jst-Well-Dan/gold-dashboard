@@ -55,6 +55,24 @@
     return k === 'percent' ? 'pp' : k === 'cny_per_usd' ? '' : '%';
   };
 
+  /* Hero 迷你走势线：构建期已抽稀到 ~120 点，前端只按 viewBox 拉伸画线。
+     深色底上用金色中性线（不暗示多空），末端圆点标最新价。 */
+  function sparkSVG(pts) {
+    if (!pts || pts.length < 2) return '';
+    const W = 220, H = 56, P = 3;
+    const vs = pts.map((p) => p[1]);
+    const lo = Math.min(...vs), hi = Math.max(...vs);
+    const X = (i) => P + (i * (W - 2 * P)) / (pts.length - 1);
+    const Y = (v) => (hi === lo ? H / 2 : H - P - ((v - lo) * (H - 2 * P)) / (hi - lo));
+    const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ');
+    const lx = X(pts.length - 1).toFixed(1), ly = Y(vs[vs.length - 1]).toFixed(1);
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+      `<title>近一年走势（${pts[0][0]} → ${pts[pts.length - 1][0]}）</title>` +
+      `<polygon points="${P},${H} ${line} ${W - P},${H}" fill="rgba(212,168,83,.16)"/>` +
+      `<polyline points="${line}" fill="none" stroke="#d4a853" stroke-width="1.5"/>` +
+      `<circle cx="${lx}" cy="${ly}" r="2.6" fill="#f0dfb4"/></svg>`;
+  }
+
   /* --------------------------------------------------------------- 头图 */
   function renderHero() {
     const root = document.getElementById('hero-stats');
@@ -70,6 +88,7 @@
             <span class="pill ${g.chg_1d > 0 ? 'up' : g.chg_1d < 0 ? 'down' : 'flat'}">${signed(g.chg_1d, '%')}</span>
           </div>
           <div class="big num">${fmtNum(g.value, 1)}<small>美元/盎司</small></div>
+          ${sparkSVG(g.spark)}
           <div class="meta">年初至今 ${signed(g.chg_ytd, '%')} · 近一年 ${signed(g.chg_1y, '%')} · ${g.date}</div>
         </div>`);
     }
@@ -81,7 +100,30 @@
             <span class="pill ${c.chg_1d > 0 ? 'up' : c.chg_1d < 0 ? 'down' : 'flat'}">${signed(c.chg_1d, '%')}</span>
           </div>
           <div class="big num">${fmtNum(c.value, 1)}<small>元/克</small></div>
+          ${sparkSVG(c.spark)}
           <div class="meta">美元金价 × 美元兑人民币 ÷ 31.1035 · ${c.date}</div>
+        </div>`);
+    }
+    if (h.drivers && h.drivers.length) {
+      const tones = { good: '#ff9b8c', bad: '#8fdcae', warn: '#f0d48a', neutral: 'rgba(255,255,255,.78)' };
+      const rows = h.drivers
+        .map((dr) => `<a class="driver-row" href="${dr.anchor}"><span>${dr.label}</span>` +
+          `<b style="color:${tones[dr.tone] || tones.neutral}">${dr.value}` +
+          `${dr.date ? `<i>· ${dr.date.slice(5)}</i>` : ''}</b></a>`)
+        .join('');
+      /* 多空拉扯一句话：偏多的 vs 偏空的，纯由 tone 推导 */
+      const bull = h.drivers.filter((dr) => dr.tone === 'good').map((dr) => dr.label);
+      const bear = h.drivers.filter((dr) => dr.tone === 'bad').map((dr) => dr.label);
+      const tension = bull.length && bear.length
+        ? `${bull.join('、')}偏多 vs ${bear.join('、')}偏空`
+        : bull.length ? `${bull.join('、')}偏多，暂无明显逆风`
+        : bear.length ? `${bear.join('、')}偏空，顺风暂缺`
+        : '多空暂处均势';
+      cards.push(`
+        <div class="hero-stat">
+          <div class="label"><span>核心驱动</span><span class="pill flat">三变量</span></div>
+          <div class="driver-rows">${rows}</div>
+          <div class="meta">${tension}</div>
         </div>`);
     }
     if (h.outlook && h.outlook.items && h.outlook.items.length) {

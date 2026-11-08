@@ -116,6 +116,25 @@ h1 {
 
 .hero-stat .meta { margin-top: 6px; font-size: 12.5px; color: rgba(255, 255, 255, .5); }
 
+/* Hero 迷你走势线：卡内通栏，细金线 + 淡填充 */
+.hero-stat .spark {
+  display: block; width: 100%; height: 56px; margin-top: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+}
+
+/* Hero 第三卡：核心驱动三行，点击跳到对应板块 */
+.driver-rows { display: flex; flex-direction: column; margin-top: 10px; }
+.driver-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, .08);
+  text-decoration: none;
+}
+.driver-row:first-child { border-top: 0; }
+.driver-row span { font-size: 12.5px; color: rgba(255, 255, 255, .55); }
+.driver-row b { font-family: var(--mono); font-size: 15px; font-weight: 700; white-space: nowrap; }
+.driver-row b i { font-style: normal; font-weight: 400; font-size: 10.5px; opacity: .55; margin-left: 4px; }
+.driver-row:hover span { color: rgba(255, 255, 255, .85); }
+
 .pill {
   font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
   border: 1px solid currentColor; white-space: nowrap;

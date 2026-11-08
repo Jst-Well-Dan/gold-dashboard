@@ -35,7 +35,10 @@
     return v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   };
 
-  const signed = (v, suffix) => (v > 0 ? '+' : v < 0 ? '' : '') + fmtNum(v, 2) + (suffix || '');
+  const signed = (v, suffix, nd) => (v > 0 ? '+' : v < 0 ? '' : '') + fmtNum(v, nd === undefined ? 2 : nd) + (suffix || '');
+
+  /* 手/吨这类大整数单位的变化量不带小数；其余保留 2 位 */
+  const deltaDigits = (c) => (c && (c.unit_key === 'contracts' || c.unit_key === 'tons') ? 0 : 2);
 
   const el = (tag, cls, html) => {
     const n = document.createElement(tag);
@@ -44,7 +47,13 @@
     return n;
   };
 
-  const deltaSuffix = (unitKey) => (unitKey === 'percent' ? 'pp' : unitKey === 'cny_per_usd' ? '' : '%');
+  /* 后缀跟着数据走（compute.delta_meta）：pct→%，diff→pp/点/手/…；
+     老的 board.json 没有 delta_suffix 才回退到按 unit 猜 */
+  const deltaSuffix = (c) => {
+    if (c.delta_suffix !== undefined) return c.delta_suffix;
+    const k = c.unit_key;
+    return k === 'percent' ? 'pp' : k === 'cny_per_usd' ? '' : '%';
+  };
 
   /* --------------------------------------------------------------- 头图 */
   function renderHero() {
@@ -215,23 +224,29 @@
     const tip = card.querySelector('.tab-delta');
     if (tip) {
       const k = sliced ? sliced.kept : [];
-      // 窗口起点为正用涨跌幅；起点≤0（跨零的利差/实际利率等）改用百分点差值，避免除负数/零得出误导数字
+      const cd = cardById.get(id);
+      const diffMode = (cd && cd.delta_mode === 'diff') || (k.length > 1 && !(k[0][1] > 0));
+      const sfx = cd ? deltaSuffix(cd) : (diffMode ? 'pp' : '%');
+      const nd = deltaDigits(cd);
+      // diff 口径（百分点/点差序列）永远显示差值；pct 口径起点为正显示涨跌幅，
+      // 起点≤0（跨零的利差等）改用差值，避免除负数/零得出误导数字
       tip.textContent = years && k.length > 1
-        ? (k[0][1] > 0
-          ? `近 ${years} 年 ${signed((k[k.length - 1][1] / k[0][1] - 1) * 100, '%')}`
-          : `近 ${years} 年 ${signed(k[k.length - 1][1] - k[0][1], 'pp')}`)
+        ? (diffMode
+          ? `近 ${years} 年 ${signed(k[k.length - 1][1] - k[0][1], sfx, nd)}`
+          : `近 ${years} 年 ${signed((k[k.length - 1][1] / k[0][1] - 1) * 100, sfx, nd)}`)
         : '';
     }
   }
 
   /* 图卡顶部的一行摘要：最新值 + 涨跌 + 10 年分位 + 数据日期 */
   function cardStatsHTML(c) {
-    const sfx = deltaSuffix(c.unit_key);
+    const sfx = deltaSuffix(c);
+    const nd = deltaDigits(c);
     const items = (c.changes || [])
       .filter((x) => x.value !== null && x.value !== undefined)
       .map((x) => {
         const cls = x.value > 0 ? 'pos' : x.value < 0 ? 'neg' : '';
-        return `<span class="delta">${x.label} <b class="${cls}">${signed(x.value, sfx)}</b></span>`;
+        return `<span class="delta">${x.label} <b class="${cls}">${signed(x.value, sfx, nd)}</b></span>`;
       });
     const p10 = c.pct && c.pct['10y'];
     if (p10 !== null && p10 !== undefined) {

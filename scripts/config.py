@@ -64,13 +64,17 @@ SECTIONS = [
 ]
 
 # freq: d=日频, w=周频, m=月频, q=季频, a=年频
+# delta: 该指标图头摘要的变化量口径。不填则按 unit 自动推导——
+#        percent / cny_per_usd 用点差(diff)，其余用涨跌幅(pct)。
+#        但零附近波动的序列（NFCI、净头寸）必须显式写 delta="diff"：
+#        基数接近 0 时涨跌幅会爆炸（如 -0.01 → -0.02 算出 +100%），毫无意义。
 SERIES = [
     # ---------------- 美元与流动性
     dict(id="DTWEXBGS", name="广义美元指数", section="dollarliquidity",
          src=("fred", "DTWEXBGS"), unit="index", decimals=2, freq="d", gold="bear",
          note="美联储广义贸易加权美元指数，覆盖 26 个贸易伙伴，比 DXY 更能反映真实竞争力。"),
     dict(id="NFCI", name="芝加哥联储金融条件指数", section="dollarliquidity",
-         src=("fred", "NFCI"), unit="index", decimals=2, freq="w", gold="bear",
+         src=("fred", "NFCI"), unit="index", decimals=2, freq="w", gold="bear", delta="diff",
          note="综合货币市场、债券、股票与影子银行的 105 个指标；正值表示金融条件紧于平均。"),
     dict(id="DEXCHUS", name="美元兑人民币汇率", section="dollarliquidity",
          src=("fred", "DEXCHUS"), unit="cny_per_usd", decimals=3, freq="d", gold="bear",
@@ -168,7 +172,7 @@ SERIES = [
          src=("yahoo", "GLD"), unit="usd_price", decimals=2, freq="d", gold="bull",
          note="全球最大黄金 ETF，西方机构配置意愿的代理（复权价）。"),
     dict(id="GOLD_COT", name="黄金交易商头寸（CFTC COT）", section="risktemperature",
-         src=("cot", "GOLD_COT"), unit="contracts", decimals=0, freq="w", gold="neutral",
+         src=("cot", "GOLD_COT"), unit="contracts", decimals=0, freq="w", gold="neutral", delta="diff",
          note="管理基金(MM)净多 vs 掉期商净空，衡量投机拥挤度。"),
     dict(id="GOLD_MA", name="200 日均线（金价动量）", section="risktemperature",
          derived=True, unit="usd", decimals=2, freq="d", gold="bull",

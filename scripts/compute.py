@@ -234,6 +234,22 @@ def band_stats_log(s: pd.Series) -> dict | None:
                 k=BAND_K, log=True)
 
 
+def delta_meta(spec: dict) -> tuple[str, str]:
+    """图头摘要的变化量口径：(mode, suffix)。
+
+    mode='pct' → 涨跌幅，后缀 %；mode='diff' → 点差，后缀按单位走
+    （百分点序列 pp，汇率无后缀，指数/头寸/吨用中文量词）。
+    """
+    mode = spec.get("delta")
+    if mode is None:
+        mode = "diff" if spec["unit"] in ("percent", "cny_per_usd") else "pct"
+    if mode == "pct":
+        return mode, "%"
+    suffix = {"percent": "pp", "cny_per_usd": "",
+              "index": "点", "contracts": "手", "tons": "吨"}.get(spec["unit"], "")
+    return mode, suffix
+
+
 def change_windows(s: pd.Series, freq: str, is_rate: bool) -> list[dict]:
     specs = {
         "d": [("5 日", 5), ("20 日", 20), ("3 月", 91), ("同比", 365)],
@@ -294,7 +310,8 @@ def build_cards(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, l
         if s is None or len(s) < 2:
             continue
         s = s.dropna()
-        is_rate = spec["unit"] in ("percent", "cny_per_usd")
+        delta_mode, delta_suffix = delta_meta(spec)
+        is_rate = delta_mode == "diff"
         unit = UNIT_LABELS.get(spec["unit"], "")
 
         card = dict(
@@ -302,6 +319,7 @@ def build_cards(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, l
             note=spec["note"] + (BAND_SUFFIX if sid in BAND_CARD_IDS else ""),
             unit=unit,
             unit_key=spec["unit"],
+            delta_mode=delta_mode, delta_suffix=delta_suffix,
             gold=spec["gold"], freq=spec["freq"],
             value=round(float(s.iloc[-1]), spec["decimals"]),
             date=s.index[-1].strftime("%Y-%m-%d"),

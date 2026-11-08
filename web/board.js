@@ -1039,13 +1039,24 @@
     const hosts = [];
     (B.sections || []).forEach((s) => {
       const box = document.querySelector(`[data-chart-grid="${s.key}"]`);
-      if (box) hosts.push({ root: box, entries: s.charts || [] });
+      if (box) hosts.push({ root: box, entries: s.entries || s.charts || [] });
     });
     const main = document.getElementById('chart-grid');
     if (main) hosts.push({ root: main, entries: (B.chart_order || []).map((id) => ({ id, kind: 'insight' })) });
     if (!hosts.length) return;
 
-    hosts.forEach((h) => { h.root.innerHTML = h.entries.map(chartCardHTML).join(''); });
+    /* 图多的板块只默认展开前 N 张，其余收进 <details>：页面从 13885px 大幅缩短。
+       注意收起容器里 echarts.init 会拿到 0 尺寸，所以里面的图一律延迟到
+       <details> 首次打开时才初始化（见下方的 toggle 监听）。 */
+    const FOLD_AFTER = 4;
+    const entriesHTML = (entries) => {
+      const all = entries.map(chartCardHTML);
+      if (entries.length <= FOLD_AFTER) return all.join('');
+      return all.slice(0, FOLD_AFTER).join('') +
+        `<details class="more-charts"><summary>展开其余 ${entries.length - FOLD_AFTER} 张图</summary>` +
+        `<div class="charts">${all.slice(FOLD_AFTER).join('')}</div></details>`;
+    };
+    hosts.forEach((h) => { h.root.innerHTML = entriesHTML(h.entries); });
 
     document.querySelectorAll('[data-tabs]').forEach((box) => {
       const id = box.dataset.tabs;
@@ -1059,11 +1070,13 @@
     });
 
     const holders = Array.from(document.querySelectorAll('[data-chart]'));
+    const hidden = (h) => !!h.closest('details.more-charts:not([open])');
 
-    // 一页 50+ 张图，一次性全画会卡首屏：先画视口内的，剩下的按帧分批补上
+    // 一页 50+ 张图，一次性全画会卡首屏：先画视口内的（收起区内的跳过），剩下的按帧分批补上
     if (window.echarts) {
       const inView = (h) => h.getBoundingClientRect().top < window.innerHeight * 1.5;
-      const queue = holders.slice().sort((a, b) => (inView(b) ? 1 : 0) - (inView(a) ? 1 : 0));
+      const queue = holders.filter((h) => !hidden(h))
+        .sort((a, b) => (inView(b) ? 1 : 0) - (inView(a) ? 1 : 0));
       const step = () => {
         const t0 = performance.now();
         while (queue.length && performance.now() - t0 < 12) {
@@ -1076,6 +1089,25 @@
     } else {
       window.addEventListener('load', () => holders.forEach((h) => initChart(h.dataset.chart, h)));
     }
+
+    // 收起区打开时再初始化里面的图（此时容器已有尺寸）
+    document.querySelectorAll('details.more-charts').forEach((dt) => {
+      dt.addEventListener('toggle', () => {
+        if (!dt.open) return;
+        dt.querySelectorAll('[data-chart]').forEach((h) => {
+          initChart(h.dataset.chart, h);
+          const c = instanceById.get(h.dataset.chart);
+          if (c) setTimeout(() => c.resize(), 30);
+        });
+      });
+    });
+
+    // 打印前先把收起区全部打开并初始化，否则纸上少图
+    window.addEventListener('beforeprint', () => {
+      document.querySelectorAll('details.more-charts:not([open])').forEach((dt) => { dt.open = true; });
+      document.querySelectorAll('[data-chart]').forEach((h) => initChart(h.dataset.chart, h));
+      instances.forEach((c) => c.resize());
+    });
 
     // 放大 / 还原
     const toggleZoom = (id, force) => {

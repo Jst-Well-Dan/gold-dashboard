@@ -73,6 +73,28 @@
       `<circle cx="${lx}" cy="${ly}" r="2.6" fill="#f0dfb4"/></svg>`;
   }
 
+  /* ------------------------------------------------------------- 降级横幅 */
+  /* 抓取失败/沿用旧缓存的接口在页顶汇总。只有 WGC 两张图会在图内自带警告，
+     其余接口如果不在汇总横幅，页面上就完全看不出「这是几天前的数」。 */
+  function renderAlerts() {
+    const root = document.getElementById('alert-bar');
+    if (!root) return;
+    const list = (B.alerts || []).filter((a) => a && a.status);
+    if (!list.length) { root.innerHTML = ''; return; }
+    const fails = list.filter((a) => a.status === 'fail');
+    const stales = list.filter((a) => a.status === 'stale');
+    const names = (arr) => arr.slice(0, 4).map((a) => a.label).join('、')
+      + (arr.length > 4 ? ` 等 ${arr.length} 项` : '');
+    const parts = [];
+    if (fails.length) parts.push(`<strong>${names(fails)}</strong> 本次抓取失败，相关图表已留空`);
+    if (stales.length) parts.push(`<strong>${names(stales)}</strong> 沿用上次数据，不是最新值`);
+    root.innerHTML = `<div class="alert-bar">
+        <span class="alert-icon">⚠</span>
+        <span class="alert-text">${parts.join('；')}</span>
+        <a class="alert-link" href="status.html">查看抓取状态 →</a>
+      </div>`;
+  }
+
   /* --------------------------------------------------------------- 头图 */
   function renderHero() {
     const root = document.getElementById('hero-stats');
@@ -1278,6 +1300,7 @@
 
   /* ----------------------------------------------------------------- 启动 */
   function boot() {
+    renderAlerts();
     renderHero();
     renderNav();
     renderSections();

@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 from datetime import datetime, timezone
@@ -1044,6 +1045,36 @@ def _wgc_correlation(base_meta: dict) -> dict:
         return out
 
 
+def _fetch_alerts() -> list[dict]:
+    """把本次抓取里「降级 / 失败」的接口提出来，供页面顶部横幅提示。
+
+    只有 WGC 那两张图会在图内自带警告；其余接口沿用旧缓存时，图面上看不出任何区别，
+    要主动点进状态页才能发现。这里统一汇总到页顶，避免「以为看的是今天的数」。
+    """
+    p = DATA / "fetch_manifest.json"
+    if not p.exists():
+        return []
+    try:
+        m = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    for key, it in (m.get("items") or {}).items():
+        st = it.get("status")
+        if st not in ("stale", "fail"):
+            continue
+        out.append(dict(
+            key=key,
+            label=it.get("label", key),
+            status=st,
+            as_of=(it.get("last_success") or "")[:10],
+            message=(it.get("message") or "")[:80],
+        ))
+    # 失败排前面；同级按名称，保证每次顺序稳定
+    out.sort(key=lambda x: (x["status"] != "fail", x["label"]))
+    return out
+
+
 def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, dict]:
     lg = load_gold_history()
     out: dict[str, dict] = {}
@@ -1293,6 +1324,7 @@ def main() -> None:
                    f"{hero['gold']['mcap_trillion']:.1f} 万亿美元（估算，仅作体量对照）"
                    if hero.get("gold") else ""),
         charts=charts,
+        alerts=_fetch_alerts(),
         chart_order=[c["id"] for c in CHARTS if c["id"] in charts and c["id"] not in pinned],
         sources=[
             "宏观指标：FRED（圣路易斯联储）—— 实际收益率、通胀预期、美元指数、失业率、联储资产负债表、财政数据",

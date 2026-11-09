@@ -436,3 +436,13 @@ footer li { margin-bottom: 5px; }
   .nav { display: none; }
   .chart-card { break-inside: avoid; box-shadow: none; }
 }
+
+/* 降级/失败横幅：页顶汇总，避免把旧数据显示成最新值 */
+.alert-bar{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;
+margin:0 0 14px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.55;
+background:rgba(214,158,46,.12);border:1px solid rgba(214,158,46,.42);color:var(--ink2)}
+.alert-bar .alert-icon{color:#b8861f;flex:none}
+.alert-bar .alert-text{flex:1;min-width:200px}
+.alert-bar strong{font-weight:600;color:var(--ink)}
+.alert-bar .alert-link{color:#8a6a1e;text-decoration:none;white-space:nowrap;border-bottom:1px dotted currentColor}
+.alert-bar .alert-link:hover{color:#5f4813}

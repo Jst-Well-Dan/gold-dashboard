@@ -72,7 +72,7 @@ data/
   raw/             原始序列（按源分目录，**不进仓库**，由 Actions 缓存承载）
   manual/          london_gold_daily.csv：伦敦现货金日频（Wind 一次导出后固化，1968–2026-03）
                    这是唯一固化的数据文件；其余全部每次自动抓取
-  fetch_manifest.json  抓取台账（**进仓库**，状态页的数据来源，也是 TTL 判断依据）
+  fetch_manifest.json  抓取台账（**不进仓库**，随 data/raw 一起走 Actions 缓存）
   board.json       前端消费的唯一数据文件（不进仓库，构建产物）
 docs/index.html    单文件看板（构建产物，**不进仓库**，由 Actions 发布为 Pages artifact）
 docs/status.html   数据状态页（构建产物，同上）
@@ -99,10 +99,10 @@ requirements.txt   运行依赖
 1. **build**：抓数 → 计算 → 生成 `docs/` → 打包成 Pages artifact
 2. **deploy**：把 artifact 发布到 GitHub Pages
 
-**`docs/` 不进仓库**（`.gitignore` 里有 `docs/`）。它是 1.6 MB 的单文件，每天提交一次会让
-`.git` 持续膨胀（实测 11 个版本已占 7.7 MB），所以改成 artifact 直发 Pages，仓库里只留源码
-和那份 272 KB 的固化金价。仍然提交的只有 `data/fetch_manifest.json`（约 20 KB）——它是
-TTL 判断的唯一依据，跨运行必须持久，git 历史本身也是一份运行记录。
+**构建产物一律不进仓库**：`docs/`（1.6 MB 单文件）和 `data/fetch_manifest.json` 都在
+`.gitignore` 里，前者直发 Pages artifact，后者与 `data/raw/` 一起放进 Actions 缓存。
+这样每次运行**不产生任何提交**，也不会再出现两个运行同时改台账、`git push` 被拒的问题。
+缓存丢了只是变慢（台账缺失时判定「本地无文件」，自动全量抓一次，约 2 分钟）。
 
 **原始数据不进仓库**（`.gitignore` 里的 `data/raw/`），用 `actions/cache` 当跨运行的持久层。
 缓存丢了不影响正确性：文件不存在时台账判定「本地无文件」，会自动全量抓一次，只是慢一点。

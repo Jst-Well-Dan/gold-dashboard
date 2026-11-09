@@ -34,7 +34,6 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # 提交 fetch_manifest.json
   pages: write
   id-token: write
 
@@ -59,10 +58,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 恢复原始数据（跨运行持久层）
+      - name: 恢复原始数据与台账（跨运行持久层）
         uses: actions/cache@v4
         with:
-          path: data/raw
+          path: |
+            data/raw
+            data/fetch_manifest.json
           # 每次用新的 key 才会真正写回缓存；restore-keys 前缀匹配到最近的一份。
           # 固定 key 只能写一次，之后永远恢复第一次的数据，是这里唯一的坑。
           key: raw-${{ github.run_id }}
@@ -76,18 +77,6 @@ jobs:
           else
             python scripts/run_daily.py
           fi
-
-      - name: 提交抓取台账
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/fetch_manifest.json
-          if git diff --cached --quiet; then
-            echo "台账无变化，跳过提交"
-            exit 0
-          fi
-          git commit -m "chore(ledger): 更新抓取台账 $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')"
-          git push
 
       - name: 打包站点
         uses: actions/upload-pages-artifact@v3

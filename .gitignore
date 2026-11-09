@@ -5,6 +5,7 @@ __pycache__/
 .shots/
 data/raw/
 data/board.json
+data/fetch_manifest.json
 docs/
 PixPin_*.webp
 tools/out/

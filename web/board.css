@@ -368,6 +368,12 @@ body.modal-open { overflow: hidden; }
   font-family: var(--mono);
 }
 
+.chart-card .warn {
+  font-size: 12px; color: #b3261e; font-weight: 700; margin-top: 4px;
+  background: rgba(179, 38, 30, .08); border-left: 3px solid #b3261e;
+  padding: 4px 8px; border-radius: 0 4px 4px 0;
+}
+
 .chart-canvas { width: 100%; height: 320px; margin-top: 8px; position: relative; }
 .chart-card.wide .chart-canvas { height: 400px; }
 .chart-card.tall .chart-canvas { height: 560px; }
@@ -426,20 +432,7 @@ footer li { margin-bottom: 5px; }
   .chart-card.wide .chart-canvas { height: 320px; }
 }
 
-/* 收起多余图表的 <details>：占满整行，summary 做成虚线按钮 */
-details.more-charts { grid-column: 1 / -1; }
-details.more-charts > summary {
-  list-style: none; cursor: pointer; text-align: center;
-  font-size: 12.5px; color: var(--muted);
-  border: 1px dashed var(--line); border-radius: 10px; padding: 10px;
-  background: rgba(255, 255, 255, .5);
-}
-details.more-charts > summary:hover { color: var(--ink); background: #fff; }
-details.more-charts > summary::-webkit-details-marker { display: none; }
-details.more-charts .charts { margin-top: 16px; }
-
 @media print {
   .nav { display: none; }
   .chart-card { break-inside: avoid; box-shadow: none; }
-  details.more-charts > summary { display: none; }
 }

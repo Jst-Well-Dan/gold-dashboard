@@ -1,0 +1,5 @@
+# 黄金看板运行依赖（GitHub Actions 与本地共用）
+pandas>=2.2,<4
+xlrd>=2.0             # GPR 官网月度数据只有 .xls（BIFF8）
+requests>=2.31
+akshare>=1.16          # 上海金 Au99.99；装不上也不影响其余数据源，SGE 会记为降级

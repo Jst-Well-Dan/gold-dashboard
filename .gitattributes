@@ -1,0 +1,8 @@
+# 行尾约定：仓库里统一存 LF，工作区按平台检出。
+* text=auto
+
+# GitHub Actions 的 workflow 必须是 LF —— 带 CRLF 时 runner 会在解析阶段报错。
+.github/workflows/*.yml text eol=lf
+
+# Windows 批处理必须是 CRLF，否则 cmd.exe 会把行尾的 ^ 和 goto 标签读错。
+*.bat text eol=crlf

@@ -2,7 +2,7 @@
 
 产出 data/board.json，包含
 - hero      : 顶部三块（国际金价、人民币金价、地上存量市值）
-- sections  : 六大板块的指标卡 + 当前状态叙述
+- sections  : 制度/宏观/市场三层的指标卡 + 当前状态叙述（另有金价走势板块）
 - charts    : 18 张历史洞察图的数据（前端 board.js 按 id 渲染）
 - meta      : 数据来源 / 更新时间
 """
@@ -24,7 +24,7 @@ TROY_OZ_PER_GRAM = 1 / 31.1034768
 BULL_BEAR_THRESHOLD = 20.0   # 黄金牛熊划分阈值（%）：涨跌 20% 才算换周期
 
 # 这些 ETF 用复权收盘价（把分红再投资算进去），避免除息日的锯齿
-ETF_ADJ = {"SPY", "QQQ", "TLT", "IEF", "SHV", "GLD"}
+ETF_ADJ = {"SPY", "QQQ", "TLT", "IEF", "SHV"}
 FY_A = 100.0  # 应付利息占收入的历史危险阈值（%）
 
 
@@ -66,11 +66,64 @@ def load_raw() -> dict[str, pd.Series]:
 HISTORY_START = "1971-01-01"
 
 
-def load_long_gold() -> pd.Series:
-    s = load_series_csv(RAW / "long_gold_monthly.csv")
-    s.index = pd.to_datetime(s.index).to_period("M").to_timestamp()
-    s = s.groupby(level=0).last()
-    return s[s.index >= HISTORY_START]
+_gold_hist_cache: pd.Series | None = None
+
+
+def load_gold_history() -> pd.Series:
+    """金价日线长历史：1968 起伦敦现货 + 近年 COMEX 期货接续。
+
+    1968-01-02 ~ 2026-03-17 用伦敦市场现货金日频定盘价（Wind 一次性导出，固化在
+    data/manual/london_gold_daily.csv，已剔除非交易日的前值填充与尾部脏数据）；
+    之后用 Yahoo GC=F（COMEX 主力连续）自动接续。
+
+    为什么换掉旧的月度均价序列（datasets/gold-prices，1833 起）：
+    - 那条是**月均价**，会把月内极值抹平。用它算历史峰值/回撤会系统性低估 ——
+      2026-01 现货峰值 5405 被压成 5020，当前回撤 -24.2% 被压成 -18.2%，
+      直接跨过 -20% 的判定阈值，把「偏利空」错判成「中性」。
+    - 现货日线 vs COMEX 期货同日配对：价差中位 +0.08%、95% 分位 +1.14%，
+      仅 1.2% 的交易日超过 2%，所以接续处看不出台阶。
+    """
+    global _gold_hist_cache
+    if _gold_hist_cache is not None:
+        return _gold_hist_cache
+
+    parts: list[pd.Series] = []
+    p = MANUAL / "london_gold_daily.csv"
+    if p.exists():
+        sp = load_series_csv(p).dropna()
+        if len(sp):
+            parts.append(sp)
+            log(f"  金价现货日线（Wind 固化）：{len(sp):,} 行  "
+                f"{sp.index[0]:%Y-%m-%d} → {sp.index[-1]:%Y-%m-%d}")
+    daily = load_gold_daily()
+    if daily is not None and len(daily):
+        if parts:
+            daily = daily[daily.index > parts[0].index[-1]]
+        if len(daily):
+            parts.append(daily)
+            log(f"  金价期货接续（GC=F）：{len(daily):,} 行  {daily.index[0]:%Y-%m-%d} →")
+    if not parts:
+        log("  ! 缺少金价长历史：data/manual/london_gold_daily.csv")
+        _gold_hist_cache = pd.Series(dtype=float)
+        return _gold_hist_cache
+
+    s = pd.concat(parts).sort_index()
+    s = s[~s.index.duplicated(keep="last")]
+    _gold_hist_cache = s[s.index >= HISTORY_START]
+    return _gold_hist_cache
+
+
+def load_gold_daily() -> pd.Series | None:
+    """COMEX 黄金主力连续日线（Yahoo GC=F，2000-08 起）。
+
+    只用于接续 load_gold_history() 里现货段末尾之后的部分（2026-03-18 起）。
+    """
+    p = RAW / "yahoo" / "GC_F.csv"
+    if not p.exists():
+        return None
+    s = load_series_csv(p, "close")
+    s = s[s.index >= HISTORY_START].dropna()
+    return s if len(s) > 100 else None
 
 
 def load_optional(series_id: str) -> pd.Series | None:
@@ -144,8 +197,8 @@ def derive(f: dict[str, pd.Series]) -> dict[str, pd.Series]:
         f["_gold_ma"] = pd.DataFrame({"p": g, "ma20": ma20, "ma60": ma60,
                                       "ma200": ma200}).dropna()
 
-    # 黄金年度涨跌幅（用月度长序列，覆盖 1916+）
-    lg = load_long_gold()
+    # 黄金年度涨跌幅（用现货日线，1968 起；取每年最后一个交易日）
+    lg = load_gold_history()
     annual = lg.groupby(lg.index.year).last()
     this_year = lg.index[-1].year
     prev = annual[annual.index < this_year]
@@ -384,13 +437,12 @@ STATE_DATES = {
     "金融条件": "NFCI", "广义美元": "DTWEXBGS", "美元/人民币": "DEXCHUS",
     "核心通胀": "PCE_YOY", "制造业": "IPMAN", "失业率": "UNRATE",
     "财政压力评分": "FISCAL_STRESS", "付息/收入": "INTEREST_RATIO",
-    "债务/GDP": "GFDEGDQ188S", "赤字/GDP": "FYFSGDA188S", "央行年购金": "CB_GOLD_NET",
+    "债务/GDP": "GFDEGDQ188S", "赤字/GDP": "FYFSGDA188S",
     "实际利率": "DFII10", "通胀预期": "T10YIE",
     "投机净多": "GOLD_COT", "均线动量": "GOLD_MA", "黄金波动率": "GVZCLS",
-    "黄金 ETF": "GLD",
-    "金银比": "GOLD", "金油比": "GOLD",
-    "上海金溢价": "SHANGHAI_PREMIUM",
-    # 「距历史高点」「周期状态」「本轮累计」「人民币金价」「地缘威胁」的 date
+    "股市恐慌 VIX": "VIXCLS",
+    # 金银比/金油比/上海金溢价已移出官方市场状态条（图表保留），此处不再映射
+    # 「历史高位/回撤深度」「周期状态」「本轮累计」「人民币金价」「地缘威胁」「央行季购金」的 date
     # 在构造时直接写入（月度长序列/派生口径，不走指标卡），main() 里不再覆盖
 }
 
@@ -454,12 +506,9 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
         pts.append(dict(label="美元/人民币", value=fmt(cny, 3), tone="neutral",
                         text=("处于近 1 年最低，人民币走强会压低人民币金价" if p1y <= 5
                               else "汇率是人民币金价的第二驱动，与美元金价叠加")))
-    bull = sum(1 for p in pts if p["tone"] == "good")
-    bear = sum(1 for p in pts if p["tone"] == "bad")
-    verdict = "偏利多" if bull > bear else ("偏利空" if bear > bull else "中性")
-    states["dollarliquidity"] = dict(verdict=verdict, points=pts)
+    dollar_pts = pts
 
-    # ---------------- 通胀与增长（宏观象限）
+    # ---------------- 宏观层 · 增长与通胀背景（宏观象限）
     cpi = gv("CPI_YOY")
     pce = gv("PCE_YOY")
     unrate = gv("UNRATE")
@@ -495,9 +544,9 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
                         text=("就业市场压力增大，可能推动美联储转鸽" if unrate > 4.5
                               else "就业强劲，支撑利率维持高位" if unrate < 4
                               else "就业市场稳定，政策无迫切转向")))
-    states["inflationgrowth"] = dict(verdict=quadrant, points=pts)
+    infl_pts = pts
 
-    # ---------------- 财政与信用
+    # ---------------- 制度层：债务、赤字、付息、央行与储备
     pts = []
     stress = gv("FISCAL_STRESS")
     if stress is not None:
@@ -526,14 +575,17 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
                         tone="good" if abs(deficit) > 6 else "neutral",
                         text="赤字超过 6%，处于非衰退期的历史极端水平" if abs(deficit) > 6
                         else "赤字较大，财政纪律承压" if abs(deficit) > 3.5 else "赤字在可控范围"))
-    cb = gv("CB_GOLD_NET")
-    if cb is not None:
-        pts.append(dict(label="央行年购金", value=f"{cb:.0f} 吨", tone="good",
-                        text="央行持续购金反映对美元储备体系的担忧，是需求端的结构性支撑"))
+    cbs = _gdt_cb_q()
+    if cbs["quarters"]:
+        _lab, _val = cbs["quarters"][-1]
+        _ttm = sum(v for _, v in cbs["quarters"][-4:])
+        pts.append(dict(label="央行季购金", value=f"{_val:+.0f}吨", date=cbs["asOf"] or "",
+                        tone="good" if _ttm > 0 else ("bad" if _ttm < 0 else "neutral"),
+                        text=f"GDT 头条口径（含未上报国估算），近4季合计 {_ttm:+.0f}吨"))
     verdict = "偏利多" if (stress or 0) >= 65 else "中性"
-    states["fiscalcredit"] = dict(verdict=verdict, points=pts)
+    states["institution"] = dict(verdict=verdict, points=pts)
 
-    # ---------------- 机会成本
+    # ---------------- 宏观层 · 机会成本（实际利率、通胀预期）
     pts = []
     r10 = gv("DFII10")
     r5 = gv("DFII5")
@@ -549,12 +601,16 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
         pts.append(dict(label="通胀预期", value=f"{bei:.2f}%", tone=tone,
                         text=("通胀预期高于 2.5%，黄金的通胀对冲价值更受重视" if bei > 2.5
                               else "通胀预期偏低，黄金的通胀叙事暂时弱化")))
-    bull = sum(1 for p in pts if p["tone"] == "good")
-    bear = sum(1 for p in pts if p["tone"] == "bad")
-    states["opportunitycost"] = dict(
-        verdict="偏利多" if bull > bear else ("偏利空" if bear > bull else "中性"), points=pts)
+    opp_pts = pts
 
-    # ---------------- 风险温度
+    # ---------------- 宏观层 · 合成：实际利率/通胀预期 → 美元/金融条件 → 增长/通胀背景
+    macro_pts = opp_pts + dollar_pts + infl_pts
+    bull = sum(1 for p in macro_pts if p["tone"] == "good")
+    bear = sum(1 for p in macro_pts if p["tone"] == "bad")
+    states["macro"] = dict(
+        verdict="偏利多" if bull > bear else ("偏利空" if bear > bull else "中性"), points=macro_pts)
+
+    # ---------------- 市场层：波动率、趋势、投机仓位（不含 ETF 价格与资金流）
     pts = []
     cot = card("GOLD_COT")
     if cot and cot.get("cot"):
@@ -578,81 +634,88 @@ def build_states(f: dict[str, pd.Series], d: dict[str, pd.Series],
                         tone="warn" if gvz > 25 else "neutral",
                         text=("突破 25，需警惕短期剧烈波动" if gvz > 25
                               else "处于低波动区间，低波动期后常伴随方向性突破")))
-    gld = gv("GLD")
-    if gld is not None:
-        ch = card("GLD")["changes"][2]["value"]
-        pts.append(dict(label="黄金 ETF", value=f"${gld:.2f}",
-                        tone="good" if (ch or 0) > 0 else "bad",
-                        text=f"近 3 月 {ch:+.1f}%，西方机构配置意愿的代理变量"))
-    states["risktemperature"] = dict(verdict="观察", points=pts)
+    vix = gv("VIXCLS")
+    if vix is not None:
+        pts.append(dict(label="股市恐慌 VIX", value=f"{vix:.1f}",
+                        tone="warn" if vix > 25 else "neutral",
+                        text=("股市恐慌升温，金价方向不定：恐慌中黄金可能被抛售换现金，也可能受避险买入"
+                              if vix > 25 else "股市平静，对金价的方向信号不强")))
+    states["market"] = dict(verdict="观察", points=pts)
 
-    # ---------------- 官方市场（首卡从绝对金价换成「距历史高点」：
-    # 绝对价格 Hero 里已有，这里只讲相对位置与比价，避免重复）
+    # ---------------- 官方市场（价格本身的状态：位置 + 动量 + 股票资金验证）
     pts = []
-    lg = load_long_gold()
+    lg = load_gold_history()
     if len(lg) > 2:
         dd_s = (lg / lg.cummax() - 1) * 100
         cur_dd = float(dd_s.iloc[-1])
         peak_str = lg.idxmax().strftime("%Y-%m")
         dd_date = lg.index[-1].strftime("%Y-%m-%d")
         if cur_dd > -3:
-            tone, txt = "good", "处于历史高点附近；2022 年以来这轮上行仍在高位区间"
+            pts.append(dict(label="历史高位", value=f"{cur_dd:.1f}%", tone="good",
+                            text="处于历史高点附近；2022 年以来这轮上行仍在高位区间",
+                            date=dd_date))
+            trend_score = 1
         elif cur_dd > -20:
-            tone, txt = ("warn",
-                          f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，" +
-                          "2022 年以来这轮上行的首次深度回调，详见「历史洞察 · 回撤图」")
+            pts.append(dict(label="回撤深度", value=f"{cur_dd:.1f}%", tone="warn",
+                            text=(f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，" +
+                                  "2022 年以来这轮上行的首次深度回调，详见「历史洞察 · 回撤图」"),
+                            date=dd_date))
+            trend_score = 0
         else:
-            tone, txt = "bad", f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，已接近熊市阈值"
-        pts.append(dict(label="距历史高点", value=f"{cur_dd:.1f}%", tone=tone, text=txt,
-                        date=dd_date))
-    gs = None
-    silver = gv("SILVER")
-    gold_px = gv("GOLD")
-    if silver and gold_px:
-        gs = gold_px / silver
-        pts.append(dict(label="金银比", value=f"{gs:.1f}",
-                        tone="good" if gs > 80 else ("bad" if gs < 50 else "neutral"),
-                        text=("金银比超过 80，白银相对低估或衰退信号" if gs > 80
-                              else "金银比低于 50，工业与投机需求旺盛" if gs < 50
-                              else "金银比处于长期均值附近")))
-    oil = gv("OIL")
-    if oil and gold_px:
-        pts.append(dict(label="金油比", value=f"{gold_px / oil:.1f}",
-                        tone="neutral", text="金油比高企代表避险需求相对更强、通胀传导偏弱"))
-    prem = gv("SHANGHAI_PREMIUM")
-    if prem is not None:
-        pts.append(dict(label="上海金溢价", value=f"{prem:+.2f}%",
-                        tone="good" if prem < 0 else "bad",
-                        text=("国内金价低于国际折算价，实物需求偏弱" if prem < 0
-                              else "国内买家愿意支付溢价，实物需求强")))
-    score = 0
-    if gs is not None and gs > 80:
-        score += 1
-    if prem is not None and prem > 0:
-        score += 1
+            pts.append(dict(label="回撤深度", value=f"{cur_dd:.1f}%", tone="bad",
+                            text=f"较 {peak_str} 高点回撤 {abs(cur_dd):.0f}%，已接近熊市阈值",
+                            date=dd_date))
+            trend_score = -1
+    else:
+        trend_score = 0
+    gold = card("GOLD")
+    ytd = f.get("_gold_ytd")
+    gold_date = gold["date"] if gold else ""
+    if ytd is not None:
+        pts.append(dict(label="今年以来", value=f"{ytd:+.1f}%", date=gold_date,
+                        tone="good" if ytd > 0 else ("bad" if ytd < 0 else "neutral"),
+                        text=f"COMEX 主力连续年内累计 {ytd:+.1f}%"))
+    m3 = None
+    if gold and len(gold["changes"]) > 2:
+        m3 = gold["changes"][2]["value"]
+    if m3 is not None:
+        pts.append(dict(label="近3月动量", value=f"{m3:+.1f}%", date=gold_date,
+                        tone="good" if m3 > 0 else ("bad" if m3 < 0 else "neutral"),
+                        text="COMEX 主力连续近 3 个月涨跌，短期动量的方向"))
+    miner_lead = False
     for sid in ("XAU", "HUI"):
         c_ = card(sid)
-        g_ = card("GOLD")
-        if c_ and g_:
-            x = c_["changes"][-1]["value"]
-            y = g_["changes"][-1]["value"]
-            if x is not None and y is not None and x > y:
-                score += 1
+        if c_ and m3 is not None and len(c_["changes"]) > 2:
+            x = c_["changes"][2]["value"]
+            if x is not None:
+                diff = x - m3
+                miner_lead = diff > 0
+                pts.append(dict(label="矿股验证",
+                                value="跑赢 {:.1f}%".format(abs(diff)) if miner_lead else "跑输 {:.1f}%".format(abs(diff)),
+                                date=c_.get("date", gold_date),
+                                tone="good" if miner_lead else "warn",
+                                text=("金矿股指数（{}）近 3 月 {:+.1f}%，相对金价现货".format(sid, x) +
+                                      ("跑赢，" + ("股票资金在确认这轮上涨" if (m3 or 0) >= 0 else "回调中矿股更抗跌") if miner_lead
+                                       else "跑输，" + ("上涨缺少股票资金确认" if (m3 or 0) >= 0 else "矿股领跌，弱势确认")))))
                 break
-    verdict = "偏利多" if score >= 2 else ("偏利空" if score == 0 else "中性")
+    score = (trend_score
+             + (1 if (ytd or 0) > 0 else (-1 if (ytd or 0) < 0 else 0))
+             + (1 if (m3 or 0) > 0 else (-1 if (m3 or 0) < 0 else 0))
+             + (1 if miner_lead else 0))
+    verdict = "偏利多" if score >= 2 else ("偏利空" if score <= -2 else "中性")
     states["officialmarket"] = dict(verdict=verdict, points=pts)
     return states
 
 
 def build_insights_state(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict:
-    """历史洞察的状态条：与 6 个板块同一套 verdict + points 口径。
+    """历史洞察的状态条：与板块同一套 verdict + points 口径。
 
     verdict 文案必须带利多/利空/中性关键词（前端 verdictTone 只认这几个词）：
     - 历史高位 → 偏利多 · 历史高位
     - 牛市中回调 → 中性 · 牛市回调
     - 熊市段 → 偏利空 · 熊市调整
     """
-    lg = load_long_gold()
+    lg = load_gold_history()
     legs = bull_bear_payload(lg, BULL_BEAR_THRESHOLD)["legs"]
     last = legs[-1]
     n_bull = sum(1 for l in legs if l["kind"] == "bull")
@@ -731,6 +794,19 @@ def _bull_bear_legs(v: np.ndarray, th: float) -> list[dict]:
     return [lg for lg in legs if lg["end"] > lg["start"]]
 
 
+def _thin_idx(a: int, b: int, max_n: int) -> list[int]:
+    """[a, b] 内的下标等距抽样，保留首尾。
+
+    输入是日频（1968 年起约 1.4 万点），逐点入图会把 board.json 撞到 370 KB。
+    牛熊分段本身仍用日频算（拐点准确），只是绘图点疏一点。
+    """
+    n = b - a + 1
+    if n <= max_n:
+        return list(range(a, b + 1))
+    step = (n - 1) / (max_n - 1)
+    return sorted({a + int(round(k * step)) for k in range(max_n)} | {a, b})
+
+
 def bull_bear_payload(s: pd.Series, threshold_pct: float) -> dict:
     """前端消费的牛熊数据：每段带 [毫秒时间戳, 本段累计%, 点位] 逐点。"""
     v = s.to_numpy(dtype=float)
@@ -744,7 +820,7 @@ def bull_bear_payload(s: pd.Series, threshold_pct: float) -> dict:
             (s.index[lg["end"]] - s.index[lg["start"]]).days / 365.25, 1e-3)
         ann = (1.0 + cum) ** (1.0 / years) - 1.0 if 1.0 + cum > 0 else -1.0
         pts = [[int(ms[i]), round(float(v[i] / p0 - 1.0) * 100, 1), round(float(v[i]), 1)]
-               for i in range(lg["start"], lg["end"] + 1)]
+               for i in _thin_idx(lg["start"], lg["end"], 150)]
         legs.append(dict(
             kind=lg["kind"],
             start=s.index[lg["start"]].strftime("%Y.%m"),
@@ -756,8 +832,214 @@ def bull_bear_payload(s: pd.Series, threshold_pct: float) -> dict:
     return dict(legs=legs, xmax=int(ms[-1]) + pad, unit=" 美元/盎司")
 
 
+def _wgc_asset_returns(f: dict, base_meta: dict) -> dict:
+    """WGC 官方口径的大类资产回报（CNY）。失败回退到本地 Yahoo 自算。"""
+    import json as _json
+    from pathlib import Path as _Path
+    p = _Path(__file__).resolve().parent.parent / "data" / "raw" / "wgc" / "gold_returns_cny.json"
+    st_p = p.parent / "fetch_status.json"
+    status = {}
+    try:
+        status = _json.loads(st_p.read_text(encoding="utf-8")) if st_p.exists() else {}
+    except Exception:  # noqa: BLE001
+        status = {}
+    stale_msg = "" if status.get("ok", True) else status.get("message", "WGC \u66f4\u65b0\u5931\u8d25")
+
+    WANT = [("Au9999", "shgf9999 index_cny"), ("\u4e2d\u56fd\u73b0\u91d1\u8d44\u4ea7", "china cash_cny"),
+            ("\u5f6d\u535a\u4e2d\u56fd\u653f\u5e9c\u503a", "i08272cn index_cny"),
+            ("\u5f6d\u535a\u4e2d\u56fd\u4f01\u4e1a\u503a", "i08275cn index_cny"),
+            ("MSCI\u4e2d\u56fd\u80a1\u5e02", "gduetcf index_cny"),
+            ("MSCI\u7f8e\u56fd\u80a1\u5e02", "gdduus index_cny"),
+            ("MSCI\u65b0\u5174\u5e02\u573a\u80a1\u5e02", "gdueegf index_cny")]
+    COLS = [("\u5e74\u521d\u81f3\u4eca", "YTD_WEEKLY"),
+            ("10\u5e74\u590d\u5408\u5e74\u5747", "10YEAR_WEEKLY"),
+            ("20\u5e74\u590d\u5408\u5e74\u5747", "20YEAR_WEEKLY")]
+
+    def _num(v):
+        try:
+            return round(float(v), 2)
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        if not p.exists():
+            raise FileNotFoundError(str(p))
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        td = data["chartData"]["tableData"]
+        asof = data["chartData"].get("asOfDate", "")
+        by_ident = {}
+        for r in td["rows"]:
+            by_ident[r[0].get("ident")] = (r[0], {c.get("key"): c.get("val") for c in r[1:]})
+        rows = []
+        for label, ident in WANT:
+            meta0, vals = by_ident.get(ident, ({}, {}))
+            rows.append(dict(name=label,
+                             values=[_num(vals.get(k)) for _, k in COLS]))
+        extra = (f"WGC \u5b98\u65b9\u53e3\u5f84\u00b7CNY\u00b7\u622a\u81f3 {asof} \u00b7 "
+                 f"YTD\u4e3a\u533a\u95f4\u7d2f\u8ba1\uff0c10/20\u5e74\u4e3a\u590d\u5408\u5e74\u5747")
+        out = dict(windows=[w for w, _ in COLS], rows=rows, unit="%",
+                   asOf=asof, source="WGC gold-returns (CNY)", **base_meta)
+        out["extra"] = extra
+        if stale_msg:
+            out["warn"] = f"\u26a0 {stale_msg}；\u56fe\u4e3a\u65e7\u7f13\u5b58 (asOf={asof})"
+        return out
+    except Exception as e:  # noqa: BLE001
+        log(f"  WGC \u53e3\u5f84\u89e3\u6790\u5931\u8d25\uff0c\u56de\u9000\u5230\u672c\u5730\u81ea\u7b97\uff1a{e}")
+        windows = [("1 \u5e74", 1), ("3 \u5e74", 3), ("5 \u5e74", 5),
+                   ("10 \u5e74", 10), ("20 \u5e74", 20)]
+        assets = [("\u9ec4\u91d1", "GOLD"), ("\u6807\u666e500", "SPY"),
+                  ("\u7eb3\u6307100", "QQQ"), ("\u957f\u503a TLT", "TLT"),
+                  ("\u4e2d\u503a IEF", "IEF"), ("\u77ed\u503a SHV", "SHV")]
+        rows = []
+        for label, sid in assets:
+            s = f.get(sid)
+            row = dict(name=label, values=[])
+            for _, yrs in windows:
+                start = s.index[-1] - pd.DateOffset(years=yrs) if s is not None and len(s) else None
+                if s is None or start is None:
+                    row["values"].append(None)
+                    continue
+                sub = s[s.index >= start]
+                if len(sub) < 2 or sub.iloc[0] <= 0:
+                    row["values"].append(None)
+                    continue
+                ann = (sub.iloc[-1] / sub.iloc[0]) ** (1 / yrs) - 1
+                row["values"].append(round(float(ann * 100), 2))
+            rows.append(row)
+        out = dict(windows=[w for w, _ in windows], rows=rows, unit="%",
+                   source="local Yahoo fallback", **base_meta)
+        out["warn"] = f"\u26a0 WGC \u5b98\u65b9\u6570\u636e\u4e0d\u53ef\u7528\uff0c\u5df2\u56de\u9000\u5230\u672c\u5730\u81ea\u7b97\uff1a{e}"
+        return out
+
+
+def _gdt_cb_q() -> dict:
+    """读 GDT 头条口径季度净购金（fetch.fetch_wgc_gdt 自动抓，落 data/raw/wgc/）。
+
+    返回 {quarters: [(label, value)], asOf, ok, error}；label 形如 "2026Q3"。
+    """
+    from pathlib import Path as _Path
+    p = _Path(__file__).resolve().parent.parent / "data" / "raw" / "wgc" / "cb_gold_net_q.csv"
+    if not p.exists():
+        return dict(quarters=[], asOf="", ok=False, error="缺少本地 CSV")
+    qs = []
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines()[1:]:
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) != 2 or "-Q" not in parts[0]:
+                continue
+            y, q = parts[0].split("-Q")
+            qs.append((f"{int(y)}Q{int(q)}", round(float(parts[1]), 1)))
+    except Exception as e:  # noqa: BLE001
+        return dict(quarters=[], asOf="", ok=False, error=f"CSV 解析失败：{e}")
+    if not qs:
+        return dict(quarters=[], asOf="", ok=False, error="CSV 无有效行")
+    y, q = qs[-1][0][:4], qs[-1][0][-1]
+    asof = (pd.Timestamp(year=int(y), month=int(q) * 3, day=1)
+            + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")
+    return dict(quarters=qs, asOf=asof, ok=True, error="")
+
+
+def _wgc_cb_quarterly(base_meta: dict) -> dict:
+    """全球央行净购金（季度，吨）：季度净购金柱状。
+
+    主口径：本地 CSV（WGC GDT 头条，含未上报国估算，手动月/季刷新）；
+    回退口径：WGC CBD 的 IMF 上报国加总（自动抓，只覆盖按时上报国）。
+    """
+    gdt = _gdt_cb_q()
+    if gdt["quarters"]:
+        qs = gdt["quarters"]
+        last4 = sum(v for _, v in qs[-4:])
+        lab, val = qs[-1]
+        prev = qs[-5][1] if len(qs) >= 5 else None
+        extra = (f"GDT 头条口径·{qs[0][0]} 起·截至 {gdt['asOf']} · 近4季合计 {last4:+.0f}吨 · "
+                 f"最新 {lab} {val:+.1f}吨")
+        if prev:
+            pct = f" / {val / abs(prev) * 100 - 100:+.0f}%" if prev else ""
+            extra += f"（同比 {val - prev:+.1f}吨{pct}）"
+        out = dict(series=[dict(name="季度净购金（吨）", points=[[l, v] for l, v in qs])],
+                   unit="吨", bar=True, sign_color=True, asOf=gdt["asOf"],
+                   last4=round(last4, 1), last_label=lab, last_value=val,
+                   source="WGC GDT（自动抓取）", **base_meta)
+        out["extra"] = extra
+        return out
+
+    log(f"  WGC 央行季度图无数据：{gdt['error']}")
+    out = dict(series=[dict(name="季度净购金（吨）", points=[])],
+               unit="吨", bar=True, sign_color=True,
+               source="WGC GDT（头条口径）", **base_meta)
+    out["warn"] = f"⚠ 央行季度购金数据不可用：{gdt['error']}"
+    return out
+
+
+# 相关性矩阵的 7 个默认资产：(接口英文名, 中文简称)，顺序与 WGC 页面一致
+WGC_CORR_ASSETS = [
+    ("SGE Au9999", "Au9999"),
+    ("MSCI EM", "MSCI新兴市场股市"),
+    ("BBG China Gov Bonds", "彭博中国政府债"),
+    ("MSCI China", "MSCI中国股市"),
+    ("BBG China Corp Bonds", "彭博中国企业债"),
+    ("MSCI US", "MSCI美国股市"),
+    ("China Cash", "中国现金资产"),
+]
+
+
+def _wgc_correlation(base_meta: dict) -> dict:
+    """黄金相关性矩阵（WGC gold-returns CNY 口径，周频，近 6 年窗口）。
+
+    读 data/raw/wgc/gold_correlations_cny.json 的 7×7 默认资产矩阵，
+    返回 ECharts 热力图可直接消费的 assets + heat[[x, y, v]]。
+    """
+    from pathlib import Path as _Path
+    import json as _json
+    st_p = (_Path(__file__).resolve().parent.parent
+            / "data" / "raw" / "wgc" / "correlations_status.json")
+    status = {}
+    try:
+        status = _json.loads(st_p.read_text(encoding="utf-8")) if st_p.exists() else {}
+    except Exception:  # noqa: BLE001
+        status = {}
+    stale_msg = "" if status.get("ok", True) else status.get("message", "WGC 相关性矩阵更新失败")
+    try:
+        p = st_p.parent / "gold_correlations_cny.json"
+        if not p.exists():
+            raise FileNotFoundError(str(p.name))
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        cd = data["chartData"]
+        out_m = cd["output"]
+        asof = cd.get("asOfDate", "")
+        inputs = cd.get("inputs", {})
+        window = f"{inputs.get('startDate', '')}~{inputs.get('endDate', '')}"
+        assets = [cn for _, cn in WGC_CORR_ASSETS]
+        grid, heat = [], []
+        for y, (en_r, _) in enumerate(WGC_CORR_ASSETS):
+            row = []
+            for x, (en_c, _) in enumerate(WGC_CORR_ASSETS):
+                v = round(float(out_m[en_r][en_c]), 3)
+                row.append(v)
+                heat.append([x, y, v])
+            grid.append(row)
+        gold_row = grid[0]
+        extra = (f"周收益率相关性·窗口 {window}·截至 {asof} · "
+                 f"Au9999 与 MSCI中国股市 {gold_row[3]:+.3f}、与 MSCI美国股市 {gold_row[5]:+.3f}、"
+                 f"与彭博中国政府债 {gold_row[2]:+.3f}（范围 -1~+1，越接近 0 分散效果越好）")
+        out = dict(assets=assets, grid=grid, heat=heat,
+                   vmin=-1, vmax=1, asOf=asof, freq="weekly", window=window,
+                   source="WGC gold-returns correlations (CNY)", **base_meta)
+        out["extra"] = extra
+        if stale_msg:
+            out["warn"] = f"⚠ {stale_msg}；图为旧缓存 (asOf={asof})"
+        return out
+    except Exception as e:  # noqa: BLE001
+        log(f"  WGC 相关性矩阵图解析失败：{e}")
+        out = dict(assets=[cn for _, cn in WGC_CORR_ASSETS], grid=[], heat=[],
+                   vmin=-1, vmax=1, source="WGC gold-returns correlations (CNY)",
+                   **base_meta)
+        out["warn"] = f"⚠ WGC 相关性矩阵不可用：{e}"
+        return out
+
+
 def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, dict]:
-    lg = load_long_gold()
+    lg = load_gold_history()
     out: dict[str, dict] = {}
 
     def meta(cid: str) -> dict:
@@ -765,18 +1047,20 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
         note = c["note"] + (BAND_SUFFIX if cid in BAND_CHART_IDS else "")
         return dict(title=c["title"], note=note)
 
-    # 1 国际金价（对数）—— load_long_gold 已裁到 1971 起
+    # 1 国际金价（对数）—— 1968 起现货日线，2026-03 后由 COMEX 接续。
+    # 图按月末收盘抽点（约 700 点，体积可控）；下面所有「峰值/回撤/年化」计算仍用日频。
+    gold_pts = ts_points(lg, "M", 2)
     out["gold_long_log"] = dict(
-        series=[dict(name="伦敦金（美元/盎司）", points=ts_points(lg, "M", 2))],
-        log=True, unit="美元/盎司",
+        series=[dict(name="国际金价（美元/盎司）", points=gold_pts)],
+        log=True, unit="美元/盎司", time_axis=True,
         **meta("gold_long_log"))
 
-    # 2 人民币金价（对数）
+    # 2 人民币金价（对数）—— 已经是日频（美元金价 × 当日汇率），不再降采样
     cny = d.get("GOLD_CNY")
     if cny is not None:
         out["cny_gold"] = dict(
-            series=[dict(name="人民币金价（元/克）", points=ts_points(cny, "M", 2))],
-            log=True, unit="元/克", **meta("cny_gold"))
+            series=[dict(name="人民币金价（元/克）", points=ts_points(cny, "D", 2))],
+            log=True, unit="元/克", time_axis=True, **meta("cny_gold"))
 
     # 3 上海金溢价
     prem = d.get("SHANGHAI_PREMIUM")
@@ -785,7 +1069,7 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
             series=[dict(name="上海金溢价（%）", points=ts_points(prem, "D", 3))],
             unit="%", zero_line=True, bands=band_stats(prem), **meta("shanghai_premium"))
 
-    # 3b 地缘政治风险（GPR 威胁指数，Caldara-Iacoviello 月度；缺数时跳过，更新跑 scripts/fetch_gpr.py）
+    # 3b 地缘政治风险（GPR 威胁指数，Caldara-Iacoviello 月度；缺数时跳过，由 fetch.fetch_gpr 自动抓取更新）
     try:
         gpr = load_series_csv(RAW / "gpr_threat_monthly.csv")
     except FileNotFoundError:
@@ -805,7 +1089,7 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
         label_min=100, scale="pct", threshold=BULL_BEAR_THRESHOLD,
         **meta("gold_bullbear"))
 
-    # 5 距高点回撤
+    # 5 距高点回撤（日频算，图按月抽点）
     dd = (lg / lg.cummax() - 1) * 100
     worst = dd.min()
     out["gold_drawdown"] = dict(
@@ -824,28 +1108,17 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
             extra=f"{len(pts)} 年中上涨 {up} 年（{up / len(pts) * 100:.0f}%）",
             **meta("gold_annual"))
 
-    # 8 黄金 vs 大类资产
-    windows = [("1 年", 1), ("3 年", 3), ("5 年", 5), ("10 年", 10), ("20 年", 20)]
-    assets = [("黄金", "GOLD"), ("标普500", "SPY"), ("纳指100", "QQQ"),
-              ("长债 TLT", "TLT"), ("中债 IEF", "IEF"), ("短债 SHV", "SHV")]
-    rows = []
-    for label, sid in assets:
-        s = f.get(sid)
-        row = dict(name=label, values=[])
-        for _, yrs in windows:
-            start = s.index[-1] - pd.DateOffset(years=yrs) if s is not None and len(s) else None
-            if s is None or start is None:
-                row["values"].append(None)
-                continue
-            sub = s[s.index >= start]
-            if len(sub) < 2 or sub.iloc[0] <= 0:
-                row["values"].append(None)
-                continue
-            ann = (sub.iloc[-1] / sub.iloc[0]) ** (1 / yrs) - 1
-            row["values"].append(round(float(ann * 100), 2))
-        rows.append(row)
-    out["asset_returns"] = dict(
-        windows=[w for w, _ in windows], rows=rows, unit="%", **meta("asset_returns"))
+    # 8 黄金 vs 大类资产（WGC 官方口径，CNY bucket）
+    #   数据：fsapi.gold.org gold-returns 接口，每周更新，缓存于 data/raw/wgc/。
+    #   口径：YTD = 年初至今区间累计（不年化）；10/20 年 = 复合年均（CAGR）。
+    #   "自 1971" 列已按用户要求移除（口径最长、与 10/20 年列不可比，且带 * 损可比性）。
+    #   失败时沿用旧缓存并在 warn/extra 里标出；无缓存才回退到本地 Yahoo 自算。
+    out["asset_returns"] = _wgc_asset_returns(f, meta("asset_returns"))
+    # 8c 黄金相关性矩阵（WGC gold-returns CNY 口径）
+    out["gold_correlation"] = _wgc_correlation(meta("gold_correlation"))
+
+    # 8b 全球央行报告净购金（季度，IMF 上报口径）
+    out["cb_net_quarterly"] = _wgc_cb_quarterly(meta("cb_net_quarterly"))
 
     # 9 比特币的黄金计价：1 BTC 值多少盎司黄金
     #   原先是「双轴价格对比」，与本文件否掉「金价 vs 油价」双轴的理由相同：两条各自缩放的线
@@ -854,7 +1127,8 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
     btc = f.get("BTC_USD")
     if btc is not None:
         gm = lg[lg.index >= "2014-01-01"]
-        gm.index = gm.index.to_period("M")
+        # lg 是日频，必须先按月取末值 —— 直接 to_period("M") 会让同月多天变成重复标签
+        gm = gm.groupby(gm.index.to_period("M")).last()
         bm = btc[btc.index >= pd.Timestamp("2014-01-01")]
         bm = bm.groupby(bm.index.to_period("M")).last()
         ratio = (bm / gm.reindex(bm.index)).dropna()
@@ -895,15 +1169,6 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
             unit="%", zero_line=True, fill_sign=True, bands=band_stats(gap),
             extra=f"最新 {last_gap:+.1f}%（200 日均线{'上方' if last_gap >= 0 else '下方'}）",
             **meta("gold_ma_gap"))
-
-    # 18 美联储资产负债表 vs 金价
-    walcl = f.get("WALCL")
-    if walcl is not None:
-        g = lg[lg.index >= "2003-01-01"]
-        out["walcl_gold"] = dict(
-            series=[dict(name="美联储总资产（万亿美元）", points=ts_points(walcl, "W", 3)),
-                    dict(name="金价（美元/盎司）", points=ts_points(g, "M", 2), axis=1)],
-            dual=True, unit="", **meta("walcl_gold"))
 
     return out
 
@@ -977,9 +1242,9 @@ def main() -> None:
         return None
 
     _drivers = [
-        ("opportunitycost", "实际利率", "实际利率", "#opportunity-cost"),
-        ("fiscalcredit", "财政压力评分", "财政压力", "#fiscal-credit"),
-        ("dollarliquidity", "广义美元", "广义美元", "#dollar-liquidity"),
+        ("macro", "实际利率", "实际利率", "#macro"),
+        ("institution", "财政压力评分", "财政压力", "#institution"),
+        ("macro", "广义美元", "广义美元", "#macro"),
     ]
     hero["drivers"] = []
     for sec_key, src_label, show_label, anchor in _drivers:
@@ -1027,8 +1292,10 @@ def main() -> None:
             "宏观指标：FRED（圣路易斯联储）—— 实际收益率、通胀预期、美元指数、失业率、联储资产负债表、财政数据",
             "金融条件：芝加哥联储 NFCI",
             "金价与资产：COMEX 黄金期货主力连续、Yahoo Finance（ETF、金银油、矿股指数）",
-            "长期金价：datasets/gold-prices 月度伦敦金价（1833 年起；金价走势图从 1971 年起）",
-            "央行与储备：世界黄金协会 WGC（央行净购金）、IMF COFER（美元储备占比）",
+            "长期金价：伦敦市场现货金日频定盘价（Wind 一次性导出，1968 起，固化在 data/manual/london_gold_daily.csv）；"
+            "2026-03-18 起由 Yahoo COMEX 主力连续 GC=F 自动接续（同日价差中位 +0.08%）",
+            "央行与储备：WGC《Gold Demand Trends》季度净购金（Metals Focus 估算口径，含未上报国）、IMF COFER（美元储备占比）",
+            "大类资产回报与相关性：世界黄金协会 WGC gold-returns 官方口径（CNY，每周更新；回报 YTD 为区间累计，10/20 年为复合年均；相关性为周频近 6 年）",
             "交易商头寸：CFTC 持仓报告（Disaggregated Futures Only）",
             "比特币：Blockchain.com 市值、Yahoo Finance 价格",
             "上海金：上海黄金交易所 Au99.99（akshare）",

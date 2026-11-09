@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数据抓取状态 · 黄金研究看板</title>
+<meta name="description" content="每个数据接口最近一次运行时间、运行状态与抓到的数据，用于快速判断看板数据是否新鲜。" />
+<meta name="color-scheme" content="light" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f1a12'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%23d4a853' stroke-width='2.5'/%3E%3C/svg%3E" />
+<style>
+:root {
+  --paper: #f7f5f0;
+  --card: #ffffff;
+  --ink: #1f1a12;
+  --ink-2: #4b4437;
+  --muted: #8a8375;
+  --line: #e6ddc9;
+  --line-soft: #f0ebdd;
+  --gold: #a8892a;
+  --gold-bright: #d4a853;
+  --ok: #2c7a54;
+  --ok-soft: #5f8f74;
+  --warn: #b8791a;
+  --bad: #b8402f;
+  --gray: #8a8375;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: Inter, -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 15px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 22px; }
+
+.banner { background: var(--ink); color: #f5efdf; padding: 34px 0 30px; }
+.banner .kicker { font: 600 11px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--gold-bright); }
+.banner h1 { margin: 10px 0 8px; font-size: 27px; letter-spacing: -.02em; }
+.banner .subtitle { margin: 0; max-width: 760px; color: #cdc4ae; font-size: 13.5px; }
+.banner .subtitle b { color: #f0dfb4; font-weight: 600; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.stat { background: rgba(255,255,255,.06); border: 1px solid rgba(212,168,83,.28); border-radius: 11px; padding: 9px 15px; min-width: 88px; }
+.stat b { display: block; font: 600 20px/1.15 var(--mono); }
+.stat span { font-size: 11.5px; color: #b9b09b; letter-spacing: .04em; }
+.stat.ok b { color: #7fc39c; }
+.stat.skip b { color: #a8bda9; }
+.stat.stale b { color: #e0a53f; }
+.stat.fail b { color: #e07a66; }
+.stat.manual b { color: #b9b09b; }
+
+.alert { margin: 22px 0 0; padding: 13px 16px; border-radius: 11px; font-size: 13.5px; line-height: 1.6;
+  background: #fdf3e6; border: 1px solid #ecd2a8; color: #7a4d10; }
+.alert.ok { background: #eef6f0; border-color: #c6ddcd; color: #2c6647; }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 26px 0 18px; }
+.toolbar a.back { color: var(--ink-2); text-decoration: none; font-size: 13px; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+.toolbar a.back:hover { color: var(--gold); border-color: var(--gold-bright); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+
+.group { margin: 0 0 26px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(31,26,18,.04); }
+.group > h2 { margin: 0; padding: 13px 18px; font-size: 13px; font-weight: 600; letter-spacing: .04em; color: var(--ink-2);
+  background: linear-gradient(#fbf9f4, #f6f2e8); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.group > h2 .n { font: 500 11px/1 var(--mono); color: var(--muted); background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 4px 8px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .06em; color: var(--muted); padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: #fdfcf8; }
+td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.badge i { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.s-ok { color: var(--ok); } .s-ok i { background: var(--ok); box-shadow: 0 0 0 3px rgba(44,122,84,.13); }
+.s-skip { color: var(--ok-soft); } .s-skip i { background: #fff; border: 2px solid var(--ok-soft); width: 7px; height: 7px; }
+.s-stale { color: var(--warn); } .s-stale i { background: var(--warn); box-shadow: 0 0 0 3px rgba(184,121,26,.15); }
+.s-fail { color: var(--bad); } .s-fail i { background: var(--bad); box-shadow: 0 0 0 3px rgba(184,47,47,.14); }
+.s-manual { color: var(--gray); } .s-manual i { background: var(--gray); }
+
+.label { color: var(--ink); }
+.label .k { display: block; font: 400 11px/1.5 var(--mono); color: var(--muted); }
+.freq { display: inline-block; font-size: 11px; color: var(--ink-2); background: #f4f0e6; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.when { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.when .rel { display: block; color: var(--muted); font-size: 11px; }
+.date { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.date .rel { display: block; color: var(--muted); font-size: 11px; }
+.date.late .rel { color: var(--warn); font-weight: 600; }
+.msg { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.msg.bad { color: var(--bad); }
+.msg.warn { color: var(--warn); }
+.dash { color: #c9c0ad; }
+
+footer { border-top: 1px solid var(--line); margin-top: 8px; padding: 20px 0 40px; color: var(--muted); font-size: 12px; }
+footer code { font-family: var(--mono); color: var(--ink-2); background: #f2eee3; padding: 1px 5px; border-radius: 4px; }
+footer p { margin: 4px 0; }
+
+@media (max-width: 860px) {
+  .hide-sm { display: none; }
+  .banner h1 { font-size: 22px; }
+  td, th { padding: 9px 9px; }
+}
+</style>
+</head>
+<body>
+
+<header class="banner">
+  <div class="wrap">
+    <div class="kicker">Data Pipeline Status</div>
+    <h1>数据抓取状态</h1>
+    <p class="subtitle">{{SUBTITLE}}</p>
+    <div class="stats">{{STATS}}</div>
+  </div>
+</header>
+
+<main class="wrap">
+  {{ALERT}}
+  <div class="toolbar">
+    <a class="back" href="index.html">← 回看板</a>
+    <div class="legend">
+      <span><i style="background:#2c7a54"></i>成功</span>
+      <span><i style="background:#fff;border:2px solid #5f8f74"></i>跳过（未到 TTL）</span>
+      <span><i style="background:#b8791a"></i>降级（抓失败，用旧数据）</span>
+      <span><i style="background:#b8402f"></i>失败</span>
+      <span><i style="background:#8a8375"></i>手工维护</span>
+    </div>
+  </div>
+  {{GROUPS}}
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>台账：<code>data/fetch_manifest.json</code>（随仓库提交，是跨运行唯一可信的抓取状态）。抓取逻辑 <code>scripts/fetch.py</code>，本页由 <code>scripts/build_status.py</code> 生成。</p>
+    <p>「跳过」表示距上次抓取还没到该频率的 TTL（日 8 小时 / 周 2 天 / 月 12 天 / 季 30 天 / 年 300 天），本地已有文件，属正常状态。</p>
+    <p>生成时间：{{GENERATED}}</p>
+  </div>
+</footer>
+
+</body>
+</html>

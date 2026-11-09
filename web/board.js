@@ -1,7 +1,7 @@
 /* ==========================================================================
    黄金研究看板 · 渲染层
    输入：window.__BOARD__（build_board.py 注入的 payload）
-   输出：头图 / 六大板块图卡 / 历史洞察长历史图（全部 ECharts）
+   输出：头图 / 三层板块图卡 / 历史洞察长历史图（全部 ECharts）
    ========================================================================== */
 (function () {
   'use strict';
@@ -187,7 +187,8 @@
     const cls = ['chart-card', !isCard && WIDE.has(entry.id) ? 'wide' : ''].join(' ').trim();
     const extra = isCard
       ? cardStatsHTML(d)
-      : d.extra ? `<div class="extra">${d.extra}</div>` : '';
+      : [(d.warn ? `<div class="warn">${d.warn}</div>` : ''),
+         (d.extra ? `<div class="extra">${d.extra}</div>` : '')].join('');
     const tabs = hasRangeTabs(entry.id) ? rangeTabsHTML(entry.id) : '';
     return `<article class="${cls}" id="chart-${entry.id}">
           <button class="chart-expand" type="button" data-expand="${entry.id}" aria-label="放大图表">⤢</button>
@@ -370,12 +371,12 @@
   }
 
   /* --------------------------------------------------------- 图表公共项 */
-  const WIDE = new Set(['gold_long_log', 'gold_annual',
-    'asset_returns', 'gold_drawdown', 'gold_bullbear']);
+  const WIDE = new Set(['gold_long_log', 'cny_gold', 'shanghai_premium', 'gold_annual',
+    'asset_returns', 'gold_correlation', 'cb_net_quarterly', 'gold_drawdown', 'gold_bullbear', 'gpr_threat']);
 
   /* 带时间窗口 tab 的图：连续走势折线图默认都有（近 1 年 / 近 5 年 / 全部）；
      年度柱状、截面矩阵、牛熊周期三类不适合按年切片，排除在外 */
-  const NO_RANGE = new Set(['gold_bullbear', 'gold_annual', 'asset_returns']);
+  const NO_RANGE = new Set(['gold_bullbear', 'gold_annual', 'asset_returns', 'cb_net_quarterly', 'gold_correlation']);
   const RANGES = [['近 1 年', 1], ['近 5 年', 5], ['全部', null]];
 
   function hasRangeTabs(id) {
@@ -396,7 +397,11 @@
 
   const LOG_FMT = (v) => {
     const a = Math.abs(v);
-    if (a >= 1000) return Math.round(v / 1000) + 'k';
+    // 千位保留一位小数：否则轴顶 1,250 和刻度 1,000 都显示成 "1k"，同一条轴上出现两个相同的标签
+    if (a >= 1000) {
+      const k = v / 1000;
+      return (Math.abs(k) >= 10 ? Math.round(k) : +k.toFixed(1)) + 'k';
+    }
     if (a >= 100) return v.toFixed(0);
     if (a >= 10) return v.toFixed(0);
     if (a >= 1) return v.toFixed(1);
@@ -662,10 +667,13 @@
 
   /* ------------------------------------------------------------- 各图表 */
   const builders = {
+    /* 金价：1971–2000 月度定盘价 + 之后日线，必须用时间轴
+       （类目轴每条观测等宽，会把 26 年日线拉成 95% 宽度、把前面 30 年压成一条竖线）。
+       刻度交给 ECharts 按跨度自己取（年 / 季 / 月 / 日），窗内纵轴仍然自适应。 */
     gold_long_log(el2, d) {
       const pts = d.series[0].points;
       const marks = (d.marks || []).map(([date, label], i) => ({
-        xAxis: date,
+        xAxis: toMs(date),
         label: {
           formatter: label, position: i % 2 === 0 ? 'insideEndTop' : 'insideEndBottom',
           color: C.muted, fontSize: 10, fontFamily: FONT, distance: 8, rotate: 0,
@@ -673,23 +681,23 @@
         lineStyle: { color: C.goldBright, type: 'dashed', width: 1 },
       }));
       const o = baseOption({
-        series: [lineSeries('伦敦金', pts, {
+        series: [lineSeries('金价', pts, {
+          data: timeData(pts),
           itemStyle: { color: C.gold },
           areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(212,168,83,.22)' }, { offset: 1, color: 'rgba(212,168,83,0)' }] } },
           markLine: { symbol: 'none', silent: true, data: marks, animation: false },
         })],
         log: true,
+        time: true,
         unit: ' 美元/盎司',
         legend: false,
         rankValues: [pts.map((p) => p[1])],
         rankScope: d.window ? `近 ${d.window} 年` : '历史',
       });
-      o.xAxis.data = categories(pts);
+      o.grid.top = 26;
       if (d.window) {
-        // 短窗口按月标注（年份缩写省地方，最右侧标签不至于被裁掉）
-        o.xAxis.axisLabel.formatter = (v) => String(v).slice(2);
-        o.grid.right = 30;
-        // 纵轴也不能还是整数量级（否则 1 年的波动被压成一条直线）
+        // 窗口内刻度交给 ECharts 按跨度取（1 年是月、5 年是季/年）
+        // 纵轴不能还是整数量级（否则 1 年的波动被压成一条直线）
         const vs = pts.map((p) => p[1]);
         const lo = Math.min(...vs);
         const hi = Math.max(...vs);
@@ -697,9 +705,11 @@
         o.yAxis[0].min = Math.max(0.001, lo - pad);
         o.yAxis[0].max = hi + pad;
       } else {
-        o.xAxis.axisLabel.formatter = (v) => (String(v).endsWith('-01') ? String(v).slice(0, 4) : '');
+        // 55 年全历史：默认会把刻度均分成 1980 / 1989 / 1998 这种非整十年份，钳成十年一格
+        const decade = 10 * 365.25 * 24 * 3600 * 1000;
+        o.xAxis.minInterval = decade;
+        o.xAxis.maxInterval = decade;
       }
-      o.grid.top = 26;
       return o;
     },
 
@@ -707,15 +717,14 @@
       const pts = d.series[0].points;
       const o = baseOption({
         series: [lineSeries('人民币金价', pts, {
+          data: timeData(pts),
           itemStyle: { color: C.teal },
           areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(47,111,106,.20)' }, { offset: 1, color: 'rgba(47,111,106,0)' }] } },
         })],
-        log: true, unit: ' 元/克', legend: false,
+        log: true, time: true, unit: ' 元/克', legend: false,
         rankValues: [pts.map((p) => p[1])],
         rankScope: d.window ? `近 ${d.window} 年` : '历史',
       });
-      o.xAxis.data = categories(pts);
-      o.xAxis.axisLabel.formatter = (v) => String(v).slice(0, 4);
       o.grid.top = 26;
       return o;
     },
@@ -764,7 +773,8 @@
         rankScope: d.window ? `近 ${d.window} 年` : '历史',
       });
       o.xAxis.data = categories(pts);
-      o.xAxis.axisLabel.formatter = (v) => String(v).slice(0, 7);
+      // 月频、跨 40 年：只留年份，否则刻度会印成 1985-01 这种没人读的串
+      o.xAxis.axisLabel.formatter = (v) => String(v).slice(0, 4);
       return o;
     },
 
@@ -855,9 +865,93 @@
       return o;
     },
 
+    cb_net_quarterly(el2, d) {
+      const pts = d.series[0].points;
+      const o = baseOption({
+        bar: true,
+        series: [{
+          name: '季度净变动',
+          type: 'bar',
+          barCategoryGap: '28%',
+          data: pts.map((p) => {
+            const prov = String(p[0]).endsWith('*');
+            return {
+              value: p[1],
+              itemStyle: {
+                color: p[1] >= 0 ? C.up : '#b9b2a1',
+                opacity: prov ? 0.45 : 1,
+                borderRadius: p[1] >= 0 ? [2, 2, 0, 0] : [0, 0, 2, 2],
+              },
+            };
+          }),
+        }],
+        unit: '吨', legend: false,
+      });
+      o.xAxis.data = categories(pts);
+      o.xAxis.axisLabel.interval = 7;
+      o.grid.top = 22;
+      return o;
+    },
+
+    gold_correlation(el2, d) {
+      /* 相关系数 -1~1，大部分格子落在浅色中间带（|v| 小）——白字看不清。
+         按 |v| 逐格选字色：浅底用墨字（白描边保底），深底用白字（深描边保底），
+         阈值 0.4：当前数据里 0.48/0.74/0.84/1 走白字，其余走墨字。 */
+      const heatLabel = (v) => (Math.abs(v) < 0.4
+        ? { color: '#1f1a12', textBorderColor: 'rgba(255,255,255,.7)', textBorderWidth: 1 }
+        : { color: '#fff', textBorderColor: 'rgba(60,50,35,.55)', textBorderWidth: 1 });
+      const o = baseOption({
+        series: [{
+          name: '相关系数',
+          type: 'heatmap',
+          // y 轴翻转后，第 0 行（Au9999）对应 y 下标 6：建 data 时直接重排 y 坐标
+          data: d.heat.map((h) => ({
+            value: [h[0], d.assets.length - 1 - h[1], h[2]],
+            label: heatLabel(h[2]),
+          })),
+          label: {
+            show: true,
+            fontSize: 11,
+            fontWeight: 500,
+            formatter: (p) => p.value[2].toFixed(3).replace('1.000', '1'),
+          },
+          itemStyle: { borderColor: '#f7f3ea', borderWidth: 2 },
+          emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,.35)' } },
+        }],
+        legend: false,
+      });
+      o.xAxis = {
+        type: 'category', data: d.assets,
+        axisLabel: { interval: 0, rotate: 24, fontSize: 11, color: '#5c5546' },
+        axisLine: { show: false }, axisTick: { show: false },
+      };
+      o.yAxis = {
+        type: 'category', data: [...d.assets].reverse(),
+        axisLabel: { fontSize: 11, color: '#5c5546' },
+        axisLine: { show: false }, axisTick: { show: false },
+      };
+      // y 轴翻转已在 data 里处理，这里不再重排
+      o.visualMap = {
+        min: d.vmin, max: d.vmax, show: false, calculable: false,
+        inRange: { color: ['#2f6db3', '#f7f3ea', '#b03a2e'] },
+      };
+      o.tooltip = {
+        trigger: 'item',
+        backgroundColor: 'rgba(255,255,255,.97)',
+        borderColor: C.line,
+        borderWidth: 1,
+        padding: [8, 11],
+        textStyle: { color: C.ink, fontSize: 12 },
+        formatter: (p) => `${d.assets[d.assets.length - 1 - p.value[1]]} × ${d.assets[p.value[0]]}<br/><b>${p.value[2].toFixed(3)}</b>`,
+      };
+      o.grid.top = 78;
+      o.grid.bottom = 8;
+      return o;
+    },
+
     asset_returns(el2, d) {
       const wins = d.windows;
-      const colors = [C.goldBright, '#95a7bb', '#5f7fa3', '#a98a6b', '#c3b49a', '#d8d2c4'];
+      const colors = [C.goldBright, '#95a7bb', '#5f7fa3', '#a98a6b', '#c3b49a', '#d8d2c4', '#7fa89b'];
       const series = d.rows.map((row, ri) => ({
         name: row.name,
         type: 'bar',
@@ -880,41 +974,56 @@
 
     gold_ma_gap(el2, d) {
       const pts = d.series[0].points;
-      const pos = pts.map((p) => (p[1] >= 0 ? p[1] : null));
-      const neg = pts.map((p) => (p[1] < 0 ? p[1] : null));
+      const b = d.bands;
+      const f = (v) => (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+      const up = b ? b.up : 10;
+      const dn = b ? b.dn : -10;
+      /* 偏离度是围绕零轴往返的振荡量，不是「涨/跌两态」——
+         所以不用红绿双色（那是牛熊周期图的语言，两套红色会被读成同一件事），
+         改用：单色线 + 零点为基线的面积 + 极端带阴影。
+         读法是「离 200 日均线多远」和「在带内还是带外」，不是「现在多/空」。 */
       const o = baseOption({
-        series: [
-          lineSeries('200 日均线上方', pts, {
-            data: pos, itemStyle: { color: C.up }, connectNulls: false,
-            areaStyle: { color: 'rgba(184,64,47,.16)' },
-            markLine: (() => {
-              const zero = { yAxis: 0, lineStyle: { color: C.muted, type: 'dashed', width: 1 }, label: { show: false } };
-              const b = d.bands;
-              // 有统计锚就用它替代固定的 ±10%（阈值随品种走，语义不变：拉伸/超跌）
-              const f = (v) => (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
-              const data = b ? [zero,
-                { yAxis: b.mean, lineStyle: { color: '#6f6350', type: 'solid', width: 1.5 }, label: { show: false } },
-                { yAxis: b.up, lineStyle: { color: C.up, type: 'dotted', width: 1 }, label: { formatter: '拉伸 ' + f(b.up), color: C.up, fontSize: 10, position: 'insideEndTop' } },
-                { yAxis: b.dn, lineStyle: { color: C.down, type: 'dotted', width: 1 }, label: { formatter: '超跌 ' + f(b.dn), color: C.down, fontSize: 10, position: 'insideEndBottom' } },
-              ] : [zero,
-                { yAxis: 10, lineStyle: { color: C.up, type: 'dotted', width: 1 }, label: { formatter: '拉伸 +10%', color: C.up, fontSize: 10, position: 'insideEndTop' } },
-                { yAxis: -10, lineStyle: { color: C.down, type: 'dotted', width: 1 }, label: { formatter: '超跌 -10%', color: C.down, fontSize: 10, position: 'insideEndBottom' } },
-              ];
-              return { symbol: 'none', silent: true, animation: false, data };
-            })(),
-          }),
-          lineSeries('200 日均线下方', pts, {
-            data: neg, itemStyle: { color: C.down }, connectNulls: false,
-            areaStyle: { color: 'rgba(44,122,84,.18)' },
-          }),
-        ],
-        unit: '%',
+        series: [lineSeries('200 日均线偏离度', pts, {
+          itemStyle: { color: C.ink2 },
+          lineStyle: { width: 1, color: C.ink2 },
+          areaStyle: { origin: 0, color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: 'rgba(184,148,46,.34)' },
+                         { offset: 0.5, color: 'rgba(184,148,46,.16)' },
+                         { offset: 1, color: 'rgba(184,148,46,.34)' }] } },
+          markArea: undefined,
+          markLine: (() => {
+            const zero = { yAxis: 0, lineStyle: { color: C.muted, type: 'solid', width: 1 }, label: { show: false } };
+            const dot = (y, color, text, pos) => ({
+              yAxis: y, lineStyle: { color, type: 'dotted', width: 1 },
+              // 白底托一下：标签所在高度上总会有线穿过去，不托底就看不清
+              label: { formatter: text, color, fontSize: 10, position: pos,
+                       backgroundColor: 'rgba(255,255,255,.82)', padding: [1, 2] },
+            });
+            // 有统计锚就用它（阈值随品种走，语义不变：拉伸 / 超跌）
+            if (!b) return { symbol: 'none', silent: true, animation: false,
+              data: [zero, dot(10, C.up, '拉伸 +10%', 'insideEndTop'), dot(-10, C.down, '超跌 -10%', 'insideEndBottom')] };
+            return { symbol: 'none', silent: true, animation: false, data: [
+              zero,
+              { yAxis: b.mean, lineStyle: { color: '#6f6350', type: 'dashed', width: 1 }, label: { show: false } },
+              dot(b.up, C.up, '拉伸 ' + f(b.up), 'insideEndTop'),
+              dot(b.dn, C.down, '超跌 ' + f(b.dn), 'insideEndBottom'),
+            ] };
+          })(),
+        })],
+        unit: '%', legend: false,
         noYGrid: !!d.bands,
         rankValues: [pts.map((p) => p[1])],
         rankScope: d.window ? `近 ${d.window} 年` : '历史',
       });
       o.xAxis.data = categories(pts);
       o.xAxis.axisLabel.formatter = (v) => String(v).slice(0, 4);
+      /* 纵轴钳到数据范围：0 和 +5% 两条参考线挤在默认 -30~40 的中间看不出差，
+         而且上方大片空白会把“离趋势多远"压扁 */
+      const vals = pts.map((p) => p[1]);
+      const lo = Math.min(...vals, dn);
+      const hi = Math.max(...vals, up);
+      o.yAxis[0].min = Math.floor((lo - 3) / 10) * 10;
+      o.yAxis[0].max = Math.ceil((hi + 3) / 10) * 10;
       o.grid.right = 78;   // 给右侧「拉伸 / 超跌」标签留位置
       return o;
     },
@@ -970,26 +1079,13 @@
       o.grid.right = 74;   // 给右侧「中位数」标签留位置
       return o;
     },
-
-    walcl_gold(el2, d) {
-      const [w, g] = d.series;
-      const series = [
-        lineSeries(w.name, w.points, {
-          data: timeData(w.points), itemStyle: { color: C.blue }, lineStyle: { width: 1.6 },
-        }),
-        lineSeries(g.name, g.points, {
-          data: timeData(g.points), itemStyle: { color: C.goldBright }, yAxisIndex: 1, lineStyle: { width: 1.6 },
-        }),
-      ];
-      return baseOption({ series, dual: true, time: true, unit: '', units: [' 万亿美元', ' 美元/盎司'] });
-    },
   };
 
   /* --------------------------------------------------------- 图表渲染 */
   const instances = [];
   const instanceById = new Map();
 
-  /* 「历史洞察」与六大板块同一套头：编号 + 标题 + verdict + 状态条。
+  /* 「历史洞察」与各板块同一套头：编号 + 标题 + verdict + 状态条。
      内容来自 B.insights（compute.build_insights_state），锚点 #insights 保持不变。 */
   function renderInsights() {
     const box = document.getElementById('insights-block');
@@ -1104,17 +1200,9 @@
     if (main) hosts.push({ root: main, entries: (B.chart_order || []).map((id) => ({ id, kind: 'insight' })) });
     if (!hosts.length) return;
 
-    /* 图多的板块只默认展开前 N 张，其余收进 <details>：页面从 13885px 大幅缩短。
-       注意收起容器里 echarts.init 会拿到 0 尺寸，所以里面的图一律延迟到
-       <details> 首次打开时才初始化（见下方的 toggle 监听）。 */
-    const FOLD_AFTER = 4;
-    const entriesHTML = (entries) => {
-      const all = entries.map(chartCardHTML);
-      if (entries.length <= FOLD_AFTER) return all.join('');
-      return all.slice(0, FOLD_AFTER).join('') +
-        `<details class="more-charts"><summary>展开其余 ${entries.length - FOLD_AFTER} 张图</summary>` +
-        `<div class="charts">${all.slice(FOLD_AFTER).join('')}</div></details>`;
-    };
+    /* 不再折叠：每张图都直接展开。之前 >4 张就收进 <details>，但现在只有两个板块
+       超过 4 张、且各只多出 1 张，折叠省不了版面，反倒让人以为图被删了。 */
+    const entriesHTML = (entries) => entries.map(chartCardHTML).join('');
     hosts.forEach((h) => { h.root.innerHTML = entriesHTML(h.entries); });
 
     document.querySelectorAll('[data-tabs]').forEach((box) => {
@@ -1129,12 +1217,11 @@
     });
 
     const holders = Array.from(document.querySelectorAll('[data-chart]'));
-    const hidden = (h) => !!h.closest('details.more-charts:not([open])');
 
-    // 一页 50+ 张图，一次性全画会卡首屏：先画视口内的（收起区内的跳过），剩下的按帧分批补上
+    // 一页 50+ 张图，一次性全画会卡首屏：先画视口内的，剩下的按帧分批补上
     if (window.echarts) {
       const inView = (h) => h.getBoundingClientRect().top < window.innerHeight * 1.5;
-      const queue = holders.filter((h) => !hidden(h))
+      const queue = holders.slice()
         .sort((a, b) => (inView(b) ? 1 : 0) - (inView(a) ? 1 : 0));
       const step = () => {
         const t0 = performance.now();
@@ -1149,21 +1236,8 @@
       window.addEventListener('load', () => holders.forEach((h) => initChart(h.dataset.chart, h)));
     }
 
-    // 收起区打开时再初始化里面的图（此时容器已有尺寸）
-    document.querySelectorAll('details.more-charts').forEach((dt) => {
-      dt.addEventListener('toggle', () => {
-        if (!dt.open) return;
-        dt.querySelectorAll('[data-chart]').forEach((h) => {
-          initChart(h.dataset.chart, h);
-          const c = instanceById.get(h.dataset.chart);
-          if (c) setTimeout(() => c.resize(), 30);
-        });
-      });
-    });
-
-    // 打印前先把收起区全部打开并初始化，否则纸上少图
+    // 打印前先把所有图都初始化一遍，否则纸上少图
     window.addEventListener('beforeprint', () => {
-      document.querySelectorAll('details.more-charts:not([open])').forEach((dt) => { dt.open = true; });
       document.querySelectorAll('[data-chart]').forEach((h) => initChart(h.dataset.chart, h));
       instances.forEach((c) => c.resize());
     });

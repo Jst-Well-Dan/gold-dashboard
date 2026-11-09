@@ -5,3 +5,6 @@ __pycache__/
 .shots/
 data/raw/
 data/board.json
+docs/
+PixPin_*.webp
+tools/out/

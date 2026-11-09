@@ -96,11 +96,11 @@
       const c = h.gold_cny;
       cards.push(`
         <div class="hero-stat">
-          <div class="label"><span>人民币金价 · 折算</span>
+          <div class="label"><span>人民币金价 · 上金所</span>
             <span class="pill ${c.chg_1d > 0 ? 'up' : c.chg_1d < 0 ? 'down' : 'flat'}">${signed(c.chg_1d, '%')}</span>
           </div>
           <div class="big num">${fmtNum(c.value, 1)}<small>元/克</small></div>
-          <div class="meta">美元金价 × 美元兑人民币 ÷ 31.1035 · ${c.date}</div>
+          <div class="meta">上金所 Au99.99 成交价 · ${c.date}</div>
         </div>`);
     }
     if (h.drivers && h.drivers.length) {

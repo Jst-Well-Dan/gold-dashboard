@@ -173,17 +173,27 @@ def derive(f: dict[str, pd.Series]) -> dict[str, pd.Series]:
             d["FISCAL_STRESS"] = score.clip(0, 100).round(1)
 
     # 人民币金价 + 上海金溢价
+    # 人民币金价一律用境内实际成交价（上金所 Au99.99）——这是「在中国买一克金多少钱」
+    # 的答案，含进口配额与境内供需形成的溢价。平价（美元金价 × 汇率）仍然算，
+    # 但它只用于定义溢价，不再当作人民币金价对外展示。
     gold_daily = f.get("GOLD")
     fx = f.get("DEXCHUS")
+    sge = load_sge()
+    parity = None
     if gold_daily is not None and fx is not None:
         fx_d = fx.reindex(fx.index.union(gold_daily.index)).ffill().reindex(gold_daily.index)
-        d["GOLD_CNY"] = (gold_daily * fx_d * TROY_OZ_PER_GRAM).dropna()
-        sge = load_sge()
+        parity = (gold_daily * fx_d * TROY_OZ_PER_GRAM).dropna()
         if sge is not None:
-            parity = (gold_daily * fx_d * TROY_OZ_PER_GRAM).dropna()
             j = pd.concat([sge.reindex(sge.index.union(parity.index)).ffill(),
                            parity], axis=1, keys=["sge", "parity"], sort=True).dropna()
             d["SHANGHAI_PREMIUM"] = ((j["sge"] / j["parity"] - 1) * 100).dropna()
+    if sge is not None and len(sge) > 200:
+        d["GOLD_CNY"] = sge
+        d["GOLD_CNY_SRC"] = "sge"
+    elif parity is not None:
+        # SGE 缺失（2016 前 / 接口失败）时退回平价折算，保证卡片不空白
+        d["GOLD_CNY"] = parity
+        d["GOLD_CNY_SRC"] = "parity"
 
     # 金价动量：多空排列状态用「金价 - 200 日均线」的偏离度表示（正=多头排列）
     if gold_daily is not None and len(gold_daily) > 220:
@@ -747,8 +757,9 @@ def build_insights_state(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> di
     ]
     cny = d.get("GOLD_CNY")
     if cny is not None and len(cny):
+        src = "上金所 Au99.99 成交价" if d.get("GOLD_CNY_SRC") == "sge" else "美元金价 × 汇率折算（SGE 缺失时的回退）"
         pts.append(dict(label="人民币金价", value=fmt(float(cny.iloc[-1]), 1),
-                        tone="neutral", text="美元金价 × 汇率 ÷ 31.1035 折算",
+                        tone="neutral", text=src,
                         date=cny.index[-1].strftime("%Y-%m-%d")))
     try:
         gpr = load_series_csv(RAW / "gpr_threat_monthly.csv")
@@ -1055,7 +1066,7 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
         log=True, unit="美元/盎司", time_axis=True,
         **meta("gold_long_log"))
 
-    # 2 人民币金价（对数）—— 已经是日频（美元金价 × 当日汇率），不再降采样
+    # 2 人民币金价（对数）—— 上金所 Au99.99 实际成交价（2016-12 起），已经是日频
     cny = d.get("GOLD_CNY")
     if cny is not None:
         out["cny_gold"] = dict(

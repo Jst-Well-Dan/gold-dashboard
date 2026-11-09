@@ -160,7 +160,7 @@ def derive(f: dict[str, pd.Series]) -> dict[str, pd.Series]:
             "interest": d["INTEREST_RATIO"],
             "deficit": f["FYFSGDA188S"].abs(),
             "debt": f["GFDEGDQ188S"],
-        }).sort_index().ffill()
+        }).sort_index().ffill(limit=8)   # 年/季频混合对齐；超过 8 期就不再往前带
         base = base.dropna()
         if len(base) > 20:
             def norm(col: pd.Series, lo: float, hi: float) -> pd.Series:
@@ -181,19 +181,20 @@ def derive(f: dict[str, pd.Series]) -> dict[str, pd.Series]:
     sge = load_sge()
     parity = None
     if gold_daily is not None and fx is not None:
-        fx_d = fx.reindex(fx.index.union(gold_daily.index)).ffill().reindex(gold_daily.index)
+        # limit=5：汇率只允许向前带 5 个观测（约一周）。停更更久就留空，
+        # 而不是拿几个月前的汇率去换算今天的金价。
+        fx_d = fx.reindex(fx.index.union(gold_daily.index)).ffill(limit=5).reindex(gold_daily.index)
         parity = (gold_daily * fx_d * TROY_OZ_PER_GRAM).dropna()
         if sge is not None:
-            j = pd.concat([sge.reindex(sge.index.union(parity.index)).ffill(),
+            j = pd.concat([sge.reindex(sge.index.union(parity.index)).ffill(limit=5),
                            parity], axis=1, keys=["sge", "parity"], sort=True).dropna()
             d["SHANGHAI_PREMIUM"] = ((j["sge"] / j["parity"] - 1) * 100).dropna()
     if sge is not None and len(sge) > 200:
         d["GOLD_CNY"] = sge
-        d["GOLD_CNY_SRC"] = "sge"
-    elif parity is not None:
-        # SGE 缺失（2016 前 / 接口失败）时退回平价折算，保证卡片不空白
-        d["GOLD_CNY"] = parity
-        d["GOLD_CNY_SRC"] = "parity"
+    else:
+        # 不再用平价折算顶替：那是一个不同口径的数，会静默地把「境内实价」换成「理论价」。
+        # 宁可留空（图与卡片不出现），也不用错的数。
+        log("  ! SGE Au99.99 缺失，人民币金价与相关卡片留空（不用平价折算顶替）")
 
     # 金价动量：多空排列状态用「金价 - 200 日均线」的偏离度表示（正=多头排列）
     if gold_daily is not None and len(gold_daily) > 220:
@@ -757,9 +758,8 @@ def build_insights_state(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> di
     ]
     cny = d.get("GOLD_CNY")
     if cny is not None and len(cny):
-        src = "上金所 Au99.99 成交价" if d.get("GOLD_CNY_SRC") == "sge" else "美元金价 × 汇率折算（SGE 缺失时的回退）"
         pts.append(dict(label="人民币金价", value=fmt(float(cny.iloc[-1]), 1),
-                        tone="neutral", text=src,
+                        tone="neutral", text="上金所 Au99.99 成交价",
                         date=cny.index[-1].strftime("%Y-%m-%d")))
     try:
         gpr = load_series_csv(RAW / "gpr_threat_monthly.csv")
@@ -843,8 +843,24 @@ def bull_bear_payload(s: pd.Series, threshold_pct: float) -> dict:
     return dict(legs=legs, xmax=int(ms[-1]) + pad, unit=" 美元/盎司")
 
 
+def _reason(e: Exception) -> str:
+    """把异常压成一句不含本地路径的短语，用于渲染在页面上的 warn。"""
+    if isinstance(e, FileNotFoundError):
+        return "数据文件缺失"
+    if isinstance(e, KeyError):
+        return "字段缺失"
+    if isinstance(e, ValueError):
+        return "内容无法解析"
+    return type(e).__name__
+
+
 def _wgc_asset_returns(f: dict, base_meta: dict) -> dict:
-    """WGC 官方口径的大类资产回报（CNY）。失败回退到本地 Yahoo 自算。"""
+    """WGC 官方口径的大类资产回报（CNY）。
+
+    口径不可用时返回空表并标警告 —— **不回落本地 Yahoo 自算**。两者差了整整一套口径
+    （WGC 是 CNY、7 个资产、YTD/10Y/20Y；本地自算是原币种、6 个资产、1/3/5/10/20Y），
+    混着用会让「同一张图」在两次运行里变成两个意思。
+    """
     import json as _json
     from pathlib import Path as _Path
     p = _Path(__file__).resolve().parent.parent / "data" / "raw" / "wgc" / "gold_returns_cny.json"
@@ -895,32 +911,10 @@ def _wgc_asset_returns(f: dict, base_meta: dict) -> dict:
             out["warn"] = f"\u26a0 {stale_msg}；\u56fe\u4e3a\u65e7\u7f13\u5b58 (asOf={asof})"
         return out
     except Exception as e:  # noqa: BLE001
-        log(f"  WGC \u53e3\u5f84\u89e3\u6790\u5931\u8d25\uff0c\u56de\u9000\u5230\u672c\u5730\u81ea\u7b97\uff1a{e}")
-        windows = [("1 \u5e74", 1), ("3 \u5e74", 3), ("5 \u5e74", 5),
-                   ("10 \u5e74", 10), ("20 \u5e74", 20)]
-        assets = [("\u9ec4\u91d1", "GOLD"), ("\u6807\u666e500", "SPY"),
-                  ("\u7eb3\u6307100", "QQQ"), ("\u957f\u503a TLT", "TLT"),
-                  ("\u4e2d\u503a IEF", "IEF"), ("\u77ed\u503a SHV", "SHV")]
-        rows = []
-        for label, sid in assets:
-            s = f.get(sid)
-            row = dict(name=label, values=[])
-            for _, yrs in windows:
-                start = s.index[-1] - pd.DateOffset(years=yrs) if s is not None and len(s) else None
-                if s is None or start is None:
-                    row["values"].append(None)
-                    continue
-                sub = s[s.index >= start]
-                if len(sub) < 2 or sub.iloc[0] <= 0:
-                    row["values"].append(None)
-                    continue
-                ann = (sub.iloc[-1] / sub.iloc[0]) ** (1 / yrs) - 1
-                row["values"].append(round(float(ann * 100), 2))
-            rows.append(row)
-        out = dict(windows=[w for w, _ in windows], rows=rows, unit="%",
-                   source="local Yahoo fallback", **base_meta)
-        out["warn"] = f"\u26a0 WGC \u5b98\u65b9\u6570\u636e\u4e0d\u53ef\u7528\uff0c\u5df2\u56de\u9000\u5230\u672c\u5730\u81ea\u7b97\uff1a{e}"
-        return out
+        log(f"  ! WGC 资产回报不可用：{e}（不回落本地自算，图留空）")
+        return dict(windows=[w for w, _ in COLS], rows=[], unit="%",
+                    source="WGC gold-returns (CNY)",
+                    warn=f"⚠ WGC 官方数据不可用，本图留空（{_reason(e)}）", **base_meta)
 
 
 def _gdt_cb_q() -> dict:
@@ -953,8 +947,9 @@ def _gdt_cb_q() -> dict:
 def _wgc_cb_quarterly(base_meta: dict) -> dict:
     """全球央行净购金（季度，吨）：季度净购金柱状。
 
-    主口径：本地 CSV（WGC GDT 头条，含未上报国估算，手动月/季刷新）；
-    回退口径：WGC CBD 的 IMF 上报国加总（自动抓，只覆盖按时上报国）。
+    唯一口径：WGC GDT 头条（含未上报国估算，fetch_wgc_gdt 自动抓）。
+    不用 CBD 仪表盘的储备存量差分 —— 那只有 IMF 上报国，且会被修订与漏报污染。
+    CSV 缺失时不画图，不做口径替换。
     """
     gdt = _gdt_cb_q()
     if gdt["quarters"]:
@@ -1045,7 +1040,7 @@ def _wgc_correlation(base_meta: dict) -> dict:
         out = dict(assets=[cn for _, cn in WGC_CORR_ASSETS], grid=[], heat=[],
                    vmin=-1, vmax=1, source="WGC gold-returns correlations (CNY)",
                    **base_meta)
-        out["warn"] = f"⚠ WGC 相关性矩阵不可用：{e}"
+        out["warn"] = f"⚠ WGC 相关性矩阵不可用，本图留空（{_reason(e)}）"
         return out
 
 
@@ -1123,7 +1118,7 @@ def build_charts(f: dict[str, pd.Series], d: dict[str, pd.Series]) -> dict[str, 
     #   数据：fsapi.gold.org gold-returns 接口，每周更新，缓存于 data/raw/wgc/。
     #   口径：YTD = 年初至今区间累计（不年化）；10/20 年 = 复合年均（CAGR）。
     #   "自 1971" 列已按用户要求移除（口径最长、与 10/20 年列不可比，且带 * 损可比性）。
-    #   失败时沿用旧缓存并在 warn/extra 里标出；无缓存才回退到本地 Yahoo 自算。
+    #   失败时沿用旧缓存并在 warn/extra 里标出；口径不可用则空表，不回落本地自算。
     out["asset_returns"] = _wgc_asset_returns(f, meta("asset_returns"))
     # 8c 黄金相关性矩阵（WGC gold-returns CNY 口径）
     out["gold_correlation"] = _wgc_correlation(meta("gold_correlation"))

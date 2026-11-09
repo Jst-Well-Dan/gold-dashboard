@@ -34,6 +34,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  contents: write   # 只为下面的心跳提交（其余流程不产生提交）
   pages: write
   id-token: write
 
@@ -82,6 +83,25 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
+
+      # GitHub 会在仓库 60 天无提交后自动停用定时任务。本仓库平时零提交（产物都走
+      # cache / artifact），所以隔一个半月补一次心跳。失败不影响部署。
+      - name: 心跳（避开 60 天无提交被停用定时任务）
+        continue-on-error: true
+        if: github.ref == 'refs/heads/master'
+        run: |
+          DAYS=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "距上次提交 ${DAYS} 天"
+          if [ "$DAYS" -lt 45 ]; then
+            echo "不需心跳"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .heartbeat
+          git add .heartbeat
+          git commit -m "chore: 心跳 $(date -u +%Y-%m-%d)（GitHub 会在 60 天无提交后停用定时任务）"
+          git push
 
   deploy:
     needs: build

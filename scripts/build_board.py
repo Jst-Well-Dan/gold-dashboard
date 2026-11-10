@@ -17,6 +17,7 @@ def build() -> Path:
     template = (WEB / "template.html").read_text(encoding="utf-8")
     css = (WEB / "board.css").read_text(encoding="utf-8")
     js = (WEB / "board.js").read_text(encoding="utf-8")
+    export_js = (WEB / "export.js").read_text(encoding="utf-8")
     echarts = (WEB / "vendor" / "echarts.min.js").read_text(encoding="utf-8")
 
     payload_js = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -27,6 +28,7 @@ def build() -> Path:
             .replace("{{ECHARTS}}", echarts)
             .replace("{{PAYLOAD}}", payload_js)
             .replace("{{JS}}", js)
+            .replace("{{EXPORT}}", export_js)
             .replace("{{SOURCES}}", sources)
             .replace("{{MCAP}}", payload.get("mcap_line", ""))
             .replace("{{GENERATED}}", payload.get("generated_at_local", "")))

@@ -1298,6 +1298,13 @@
     });
   }
 
+  /* ------------------------------------------------- 导出模块的内部句柄 */
+  /* web/export.js 要把图重排成小红书图卡：图的 option、图卡元数据、数字格式化
+     都只有一份定义，导出侧直接复用，避免网页和图片对不上。 */
+  window.__BOARD_INTERNALS__ = {
+    B, chartOption, cardById, fmtNum, signed, deltaSuffix, deltaDigits, fmtDigits,
+  };
+
   /* ----------------------------------------------------------------- 启动 */
   function boot() {
     renderAlerts();

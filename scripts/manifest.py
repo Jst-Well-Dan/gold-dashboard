@@ -2,15 +2,15 @@
 
 为什么需要这张台账
 ------------------
-1. **mtime 在 CI 里不可信。** GitHub Actions 每次都是全新 checkout，配
-   `actions/cache` 恢复出来的文件，mtime 会被刷成「恢复那一刻」。所以拿
-   `time.time() - stat().st_mtime` 判断缓存，在 CI 里必然误判：要么全部当成
-   新鲜永远不抓，要么全部当成过期每天全量重抓。新鲜度只能看这里记的时间戳。
+1. **mtime 在 CI 里不可信。** GitHub Actions 每次都是全新 checkout，检出的文件
+   mtime 一律是「检出那一刻」。所以拿 `time.time() - stat().st_mtime` 判断新鲜度，
+   在 CI 里必然误判：要么全部当成新鲜永远不抓，要么全部当成过期每天全量重抓。
+   新鲜度只能看这里记的时间戳。
 2. **季/年度数据不必每天重抓。** 债务/GDP、赤字/GDP 这类一年只变 1~4 次，
    跟 VIX 用同一个 TTL 是浪费。所以 TTL 按指标频率分档（见 FREQ_TTL_DAYS）。
 3. **要能看出「最近一次运行状况」。** `data/fetch_manifest.json` 随仓库提交，
-   是跨运行唯一可信的状态（cache 可能被清，台账不会被清），docs/status.html
-   直接读它渲染表格。
+   是跨运行唯一可信的状态（本地和线上共享同一份，git 历史就是运行记录），
+   docs/status.html 直接读它渲染表格。
 
 文件位置：data/fetch_manifest.json（**要提交进仓库**，不在 .gitignore 里）
 """

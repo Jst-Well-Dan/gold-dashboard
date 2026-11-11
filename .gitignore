@@ -3,9 +3,13 @@ __pycache__/
 .recon/
 .probe/
 .shots/
-data/raw/
-data/board.json
-data/fetch_manifest.json
-docs/
 PixPin_*.webp
 tools/out/
+
+# 构建产物不进仓库：docs/index.html 是 1.6 MB 单文件且每天整篇重排，delta 压不动
+# （实测 11 个版本已占 7.7 MB）。它只走 Pages artifact 发布。
+docs/
+
+# 注意：data/raw/、data/fetch_manifest.json、data/board.json 是**故意入库**的。
+# 它们是排查问题的证据链，也是跨运行唯一的持久层。CSV 都是追加型，git 只存那一行
+# delta，实测每天约 7 KB（一年 2~3 MB）。详见 README「数据为什么进仓库」。

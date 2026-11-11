@@ -27,6 +27,16 @@ python scripts/run_daily.py --serve    # 跑完起本地静态服务预览
 
 Windows 直接双击 `run_daily.bat`，或双击根目录 `index.html`（跳转壳 → `docs/index.html`）。
 
+**和线上对齐**：Actions 跑完的数据是提交进仓库的，所以本地同步就两条命令：
+
+```bash
+git pull                        # 代码 + data/raw + 台账 + board.json 一次拿全
+python scripts/run_daily.py     # 按台账 TTL 补抓（通常大部分跳过），重建页面
+```
+
+`git pull` 只拿数据不出页面（`docs/` 不入库），所以第二条命令不能省；如果本地台账
+本来就比线上旧（例如两天没同步），第二条会自动把日频接口重抓一遍。
+
 央行季度净购金（GDT 头条口径）**不需要手工维护**：`fetch_wgc_gdt` 全自动抓
 （报告列表页找最新一期 slug → 报告的 central-banks 子页找图表 id → 取 Q1..Q4 × 年份矩阵），
 按季度 30 天 TTL 更新，落 `data/raw/wgc/cb_gold_net_q.csv`。
@@ -70,11 +80,11 @@ web/
   vendor/echarts.min.js
 .github/workflows/daily.yml   每交易日自动跑并发布到 Pages
 data/
-  raw/             原始序列（按源分目录，**不进仓库**，由 Actions 缓存承载）
+  raw/             原始序列（按源分目录，**进仓库**：排查 bug 的唯一证据链）
   manual/          london_gold_daily.csv：伦敦现货金日频（Wind 一次导出后固化，1968–2026-03）
                    这是唯一固化的数据文件；其余全部每次自动抓取
-  fetch_manifest.json  抓取台账（**不进仓库**，随 data/raw 一起走 Actions 缓存）
-  board.json       前端消费的唯一数据文件（不进仓库，构建产物）
+  fetch_manifest.json  抓取台账（**进仓库**：TTL 判断的唯一依据，git 历史本身就是运行记录）
+  board.json       前端消费的唯一数据文件（**进仓库**：每天一次的 delta 只有几 KB）
 docs/index.html    单文件看板（构建产物，**不进仓库**，由 Actions 发布为 Pages artifact）
 docs/status.html   数据状态页（构建产物，同上）
 requirements.txt   运行依赖
@@ -105,22 +115,32 @@ requirements.txt   运行依赖
 1. **build**：抓数 → 计算 → 生成 `docs/` → 打包成 Pages artifact
 2. **deploy**：把 artifact 发布到 GitHub Pages
 
-**构建产物一律不进仓库**：`docs/`（1.6 MB 单文件）和 `data/fetch_manifest.json` 都在
-`.gitignore` 里，前者直发 Pages artifact，后者与 `data/raw/` 一起放进 Actions 缓存。
-这样每次运行**不产生任何提交**，也不会再出现两个运行同时改台账、`git push` 被拒的问题。
-缓存丢了只是变慢（台账缺失时判定「本地无文件」，自动全量抓一次，约 2 分钟）。
+**构建产物一律不进仓库**：`docs/`（1.6 MB 单文件，每天整篇重排、delta 压不动）在 `.gitignore` 里，
+只走 Pages artifact。**抓取数据反过来全部入库**：`data/raw/`、`data/fetch_manifest.json`、
+`data/board.json` 由 workflow 末尾一步 `git add -A data` 提交（数据无变化就不提交）。
 
-因为平时零提交，还要防一件 GitHub 的默认行为：**仓库 60 天没有提交就会自动停用定时任务**。
-所以 workflow 末尾有一道心跳 —— 距上次提交超过 45 天就写一个 `.heartbeat` 提交一次，
-平时不触发。这是本仓库唯一的自动提交。
+为什么数据入库（比它看起来便宜，也比 cache 好用）：
 
-**原始数据不进仓库**（`.gitignore` 里的 `data/raw/`），用 `actions/cache` 当跨运行的持久层。
-缓存丢了不影响正确性：文件不存在时台账判定「本地无文件」，会自动全量抓一次，只是慢一点。
+- **体积**：这些 CSV 都是追加型，每天只多一行，git 存的是 delta。实测把当前 `data/raw`（5.7 MB）
+  每天跑一次、连续提交 60 天，`.git` 只从 1.5 MB 长到 1.9 MB，约 **7 KB/天、2~3 MB/年**。
+  真正压不动的是 `docs/index.html`——当初 11 个版本就吃掉 7.7 MB——而它已经被排除在外了。
+- **排查**：`git log -p data/raw/fred/VIXCLS.csv` 能直接回答「那天到底写了什么」、
+  「哪个源退化了」，cache 里的东西既下载不了也 diff 不了。
+- **台账只有一份**：本地和线上不再是两份互不相通的记录，`git pull` 后本地就知道线上刚抓过。
+- **顺手解决 60 天问题**：GitHub 会在仓库 60 天无提交后停用定时任务，天天有数据提交就不需要
+  以前那个 `.heartbeat` 心跳补丁了。
 
-### 为什么不用文件时间判断缓存
+数据提交路径（`data/**`）与 workflow 自己的 `on.push.paths`（`scripts/**`、`web/**`…）不重叠，
+所以 bot 的提交不会反过来触发运行。两个补拍与主拍偶尔撞车时（`concurrency` 已串行），
+提交步会 rebase 后重推；就算推送彻底失败也不影响正确性，下次运行会按缺失的台账全量重抓。
 
-GitHub Actions 每次都是全新 checkout，cache 恢复出来的文件 mtime 会被刷成「恢复那一刻」。
-拿 `time.time() - st_mtime` 判断缓存，在 CI 里必然误判：要么全部当成新鲜永远不抓，要么全部
+如果哪天真长到碍事（比如年满 200 MB），回退成本只是往 `.gitignore` 里加回三行。
+
+### 为什么不用文件时间判断新鲜度
+
+GitHub Actions 每次都是全新 checkout，检出的文件 mtime 一律是「检出那一刻」——数据入库后
+这一点比以前更明显（以前是 cache 恢复把 mtime 刷成恢复时刻，现在是 checkout 刷成检出时刻）。
+拿 `time.time() - st_mtime` 判断，在 CI 里必然误判：要么全部当成新鲜永远不抓，要么全部
 当成过期每天全量重抓。所以新鲜度只看 `data/fetch_manifest.json` 里记的时间戳，mtime 仅在
 本地首次接入（还没有台账）时兜底。
 

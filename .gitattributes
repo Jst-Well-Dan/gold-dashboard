@@ -6,3 +6,9 @@
 
 # Windows 批处理必须是 CRLF，否则 cmd.exe 会把行尾的 ^ 和 goto 标签读错。
 *.bat text eol=crlf
+
+# 抓取数据入库：仓库里统一 LF。Windows 上 pandas 写出来是 CRLF，不固定行尾会让
+# 同一次抓取在本地与 CI 之间产生整文件级 diff，把真正的数据变化淹掉。
+# 只管抓取产物（data/raw、构建出的 json）；data/manual 是 Wind 导出的原件，不动它。
+data/raw/** text eol=lf
+data/*.json text eol=lf

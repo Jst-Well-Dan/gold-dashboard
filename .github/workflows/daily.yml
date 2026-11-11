@@ -1,13 +1,19 @@
 name: 更新看板
 
-# 每次运行：抓数 → 计算 → 生成 docs/index.html 与 docs/status.html → 发布到 GitHub Pages
+# 每次运行：抓数 → 计算 → 生成 docs/index.html 与 docs/status.html → 提交数据 → 发布到 GitHub Pages
 #
-# 部署方式：Pages 用 artifact（Source = GitHub Actions），**不提交 docs/**。
-# 原因：docs/index.html 是 1.6 MB 的单文件，每天提交一次会让 .git 持续膨胀
-# （实测 11 个版本已占 7.7 MB），长期 clone 会很难受。
+# 持久层的分工：
+#   data/raw/ + data/fetch_manifest.json + data/board.json  → **提交进仓库**
+#     原始 CSV 是排查 bug 的唯一证据链（那次运行到底写了什么、哪个源退化了），
+#     台账是 TTL 判断的唯一依据。CSV 都是追加型，git 只存新增那一行的 delta，
+#     实测每天约 7 KB，一年 2~3 MB —— 比它在排查时省下的时间便宜得多。
+#     顺带解决两件事：本地 `git pull` 就能拿到线上那份数据；每天有提交，
+#     不会触发 GitHub「60 天无提交自动停用定时任务」。
+#   docs/  → **不提交**，只走 Pages artifact
+#     1.6 MB 单文件，每天整篇重排，delta 压不动（实测 11 个版本已占 7.7 MB）。
 #
-# 仍然提交的只有 data/fetch_manifest.json（约 20 KB）：它是 TTL 判断的唯一依据，
-# 跨运行必须持久，而且 git 历史本身就是一份运行记录。
+# 早期的做法是把 data/ 放进 actions/cache 当持久层。已废除：cache 不可下载、
+# 不可 diff，本地与线上各存一份互不相通的台账，而且固定 key 只能写一次的坑很难记。
 
 on:
   schedule:
@@ -41,7 +47,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # 只为下面的心跳提交（其余流程不产生提交）
+  contents: write   # 提交 data/ 下的抓取结果（每天一次）
   pages: write
   id-token: write
 
@@ -66,18 +72,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 恢复原始数据与台账（跨运行持久层）
-        uses: actions/cache@v4
-        with:
-          path: |
-            data/raw
-            data/fetch_manifest.json
-          # 每次用新的 key 才会真正写回缓存；restore-keys 前缀匹配到最近的一份。
-          # 固定 key 只能写一次，之后永远恢复第一次的数据，是这里唯一的坑。
-          key: raw-${{ github.run_id }}
-          restore-keys: |
-            raw-
-
       - name: 抓数 → 计算 → 出页面
         run: |
           if [ "${{ inputs.force }}" = "true" ]; then
@@ -86,29 +80,34 @@ jobs:
             python scripts/run_daily.py
           fi
 
+      # 数据入库。注意这里提交的路径与下面 on.push.paths 里的任何一项都不重叠，
+      # 所以这次提交不会反过来触发一次运行（避免自我触发的死循环）。
+      - name: 提交数据变化
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data
+          if git diff --cached --quiet; then
+            echo "数据无变化，跳过提交"
+            exit 0
+          fi
+          git diff --cached --stat | tail -3
+          git commit -m "chore(data): 抓取 $(date -u +%Y-%m-%dT%H:%MZ)"
+          # 两个补拍可能与主拍撞车（concurrency 已串行，但排队时基commit 可能已变），
+          # 冲突就 rebase 后重推。数据文件之间不重叠，rebase 不会产生实质冲突。
+          for i in 1 2 3; do
+            git push origin HEAD:${GITHUB_REF_NAME} && exit 0
+            echo "push 失败（第 $i 次），rebase 后重试"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            sleep 5
+          done
+          echo "::error::数据提交推送失败；下次运行会自动重抓，不会丢数据"
+          exit 1
+
       - name: 打包站点
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
-
-      # GitHub 会在仓库 60 天无提交后自动停用定时任务。本仓库平时零提交（产物都走
-      # cache / artifact），所以隔一个半月补一次心跳。失败不影响部署。
-      - name: 心跳（避开 60 天无提交被停用定时任务）
-        continue-on-error: true
-        if: github.ref == 'refs/heads/master'
-        run: |
-          DAYS=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
-          echo "距上次提交 ${DAYS} 天"
-          if [ "$DAYS" -lt 45 ]; then
-            echo "不需心跳"
-            exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > .heartbeat
-          git add .heartbeat
-          git commit -m "chore: 心跳 $(date -u +%Y-%m-%d)（GitHub 会在 60 天无提交后停用定时任务）"
-          git push
 
   deploy:
     needs: build

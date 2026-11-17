@@ -193,6 +193,14 @@ h1 {
 
 .nav .right { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
 
+/* GitHub 图标：跟在更新戳右侧，单独保持 28px 点按区 */
+.nav a.gh {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border-radius: 8px; color: var(--ink-2);
+}
+.nav a.gh:hover { background: var(--paper-2); color: var(--ink); }
+.nav a.gh svg { display: block; }
+
 /* ---------------------------------------------------------------- 板块区 */
 main { padding-bottom: 40px; }
 
@@ -419,6 +427,7 @@ footer li { margin-bottom: 5px; }
 /* ------------------------------------------------------------------ 响应 */
 @media (max-width: 900px) {
   .nav .right { display: none; }
+  .nav a.gh { margin-left: 4px; }
   .hero-stats { grid-template-columns: 1fr; }
   .state-item { border-left: 0; border-top: 1px solid var(--line-soft); }
   .state-item:first-child { border-top: 0; }

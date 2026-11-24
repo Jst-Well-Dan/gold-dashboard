@@ -9,23 +9,48 @@
   const B = window.__BOARD__;
   if (!B) return;
 
-  const C = {
-    gold: '#b8942e',
-    goldBright: '#d4a853',
-    goldSoft: '#e9d7a6',
-    ink: '#1f1a12',
-    ink2: '#4b4437',
-    muted: '#8a8375',
-    line: '#e6ddc9',
-    /* 红涨绿跌：up = 红（上涨/利多），down = 绿（下跌/利空） */
-    up: '#b8402f',
-    down: '#2c7a54',
-    blue: '#43689b',
-    teal: '#2f6f6a',
-    slate: '#8b8fa3',
+  /* ---------------------------------------------------------- 令牌取色
+     ECharts 的 option / SVG 属性都不认 var()，所以颜色只能读成真实值。
+     色板只有一份（主题 tokens.css），这里按令牌名取，取到 oklch() 原样交出去——
+     Chrome/Edge/Safari/Firefox 的 canvas 与 SVG 都支持 color-mix 与 oklch。
+     明暗切换是整页 reload（见 theme.js），所以这份色值不需要响应式重算。 */
+  const CSS_ = getComputedStyle(document.documentElement);
+  const tok = (name, fallback) => {
+    const v = CSS_.getPropertyValue(name).trim();
+    return v || fallback;
   };
 
-  const FONT = 'Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+  const C = {
+    gold: tok('--brand', '#835a18'),
+    goldBright: tok('--brand-f', '#bd8f4e'),
+    goldSoft: tok('--gold-soft', '#f0dfb4'),
+    ink: tok('--ink', '#1c1712'),
+    ink2: tok('--ink-2', '#4a433a'),
+    muted: tok('--muted', '#6f685c'),
+    line: tok('--line', '#e4ddcf'),
+    grid: tok('--line-soft', '#ece6da'),
+    /* 红涨绿跌：up = 朱（上涨/利多），down = 石绿（下跌/利空） */
+    up: tok('--up', '#924c44'),
+    down: tok('--down', '#29734e'),
+    card: tok('--card', '#fffdf8'),
+    dim: tok('--dim', '#726c63'),
+    /* 系列色：第三/四/五系列，以及两个中性档 */
+    blue: tok('--actual', '#356697'),
+    teal: tok('--series-4', '#007378'),
+    plum: tok('--series-3', '#7a5186'),
+    qing: tok('--series-4', '#007378'),
+    ochre: tok('--series-5', '#8e522e'),
+    slate: tok('--dim', '#726c63'),
+    /* 深色带（头图）上的文字 */
+    bandInk: tok('--band-ink', '#ece6da'),
+    bandMuted: tok('--band-muted', '#a39b8e'),
+  };
+  /* 半透明版本：同样是令牌，只是带 alpha（SVG fill 与 ECharts areaStyle 都认） */
+  const alpha = (c, a) => (c.startsWith('#') && (c.length === 7)
+    ? c + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
+    : `color-mix(in oklch, ${c} ${Math.round(a * 100)}%, transparent)`);
+
+  const FONT = tok('--font-sans', '-apple-system, "PingFang SC", "Microsoft YaHei", sans-serif');
 
   /* ------------------------------------------------------------ 小工具 */
   const fmtNum = (v, nd) => {
@@ -68,9 +93,9 @@
     const lx = X(pts.length - 1).toFixed(1), ly = Y(vs[vs.length - 1]).toFixed(1);
     return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
       `<title>近一年走势（${pts[0][0]} → ${pts[pts.length - 1][0]}）</title>` +
-      `<polygon points="${P},${H} ${line} ${W - P},${H}" fill="rgba(212,168,83,.16)"/>` +
-      `<polyline points="${line}" fill="none" stroke="#d4a853" stroke-width="1.5"/>` +
-      `<circle cx="${lx}" cy="${ly}" r="2.6" fill="#f0dfb4"/></svg>`;
+      `<polygon points="${P},${H} ${line} ${W - P},${H}" fill="${alpha(C.goldBright,.18)}"/>` +
+      `<polyline points="${line}" fill="none" stroke="${C.goldBright}" stroke-width="1.5"/>` +
+      `<circle cx="${lx}" cy="${ly}" r="2.6" fill="${C.goldSoft}"/></svg>`;
   }
 
   /* ------------------------------------------------------------- 降级横幅 */
@@ -126,7 +151,7 @@
         </div>`);
     }
     if (h.drivers && h.drivers.length) {
-      const tones = { good: '#ff9b8c', bad: '#8fdcae', warn: '#f0d48a', neutral: 'rgba(255,255,255,.78)' };
+      const tones = { good: C.up, bad: C.down, warn: C.goldBright, neutral: C.bandInk };
       const rows = h.drivers
         .map((dr) => `<a class="driver-row" href="${dr.anchor}"><span>${dr.label}</span>` +
           `<b style="color:${tones[dr.tone] || tones.neutral}">${dr.value}` +
@@ -413,7 +438,7 @@
       axisLine: { lineStyle: { color: C.line } },
       axisTick: { show: false },
       axisLabel: { color: C.muted, fontSize: 10.5, fontFamily: FONT, hideOverlap: true },
-      splitLine: { lineStyle: { color: '#f1ecdf' } },
+      splitLine: { lineStyle: { color: C.grid } },
     }, extra || {});
   }
 
@@ -480,7 +505,7 @@
       grid: { left: 8, right: dual ? 8 : 14, top: legend === false ? 16 : 38, bottom: 6, containLabel: true },
       tooltip: rankValues ? {
         trigger: 'axis',
-        backgroundColor: 'rgba(255,255,255,.97)',
+        backgroundColor: C.card,
         borderColor: C.line,
         borderWidth: 1,
         padding: [8, 11],
@@ -489,7 +514,7 @@
         formatter: (p) => rankTip(p, rankValues, unit || '', rankScope),
       } : units ? {
         trigger: 'axis',
-        backgroundColor: 'rgba(255,255,255,.97)',
+        backgroundColor: C.card,
         borderColor: C.line,
         borderWidth: 1,
         padding: [8, 11],
@@ -511,7 +536,7 @@
         },
       } : {
         trigger: 'axis',
-        backgroundColor: 'rgba(255,255,255,.97)',
+        backgroundColor: C.card,
         borderColor: C.line,
         borderWidth: 1,
         padding: [8, 11],
@@ -706,7 +731,7 @@
         series: [lineSeries('金价', pts, {
           data: timeData(pts),
           itemStyle: { color: C.gold },
-          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(212,168,83,.22)' }, { offset: 1, color: 'rgba(212,168,83,0)' }] } },
+          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: alpha(C.goldBright, .22) }, { offset: 1, color: alpha(C.goldBright, 0) }] } },
           markLine: { symbol: 'none', silent: true, data: marks, animation: false },
         })],
         log: true,
@@ -741,7 +766,7 @@
         series: [lineSeries('人民币金价', pts, {
           data: timeData(pts),
           itemStyle: { color: C.teal },
-          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(47,111,106,.20)' }, { offset: 1, color: 'rgba(47,111,106,0)' }] } },
+          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: alpha(C.teal, .20) }, { offset: 1, color: alpha(C.teal, 0) }] } },
         })],
         log: true, time: true, unit: ' 元/克', legend: false,
         rankValues: [pts.map((p) => p[1])],
@@ -756,7 +781,7 @@
       const o = baseOption({
         series: [lineSeries('溢价', pts, {
           itemStyle: { color: C.blue },
-          areaStyle: { color: 'rgba(67,104,155,.10)' },
+          areaStyle: { color: alpha(C.blue, .10) },
           markLine: (() => {
             const data = [{ yAxis: 0 }, ...bandLines(d.bands)];
             return {
@@ -780,7 +805,7 @@
       const o = baseOption({
         series: [lineSeries('GPR 威胁指数', pts, {
           itemStyle: { color: C.blue },
-          areaStyle: { color: 'rgba(67,104,155,.10)' },
+          areaStyle: { color: alpha(C.blue, .10) },
           markLine: (() => {
             const data = [{ yAxis: 100, label: { formatter: '历史常态 100', color: C.muted, fontSize: 10, position: 'insideEndTop' } }, ...bandLines(d.bands)];
             return {
@@ -855,7 +880,7 @@
       const o = baseOption({
         series: [lineSeries('回撤', pts, {
           itemStyle: { color: C.down },
-          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(44,122,84,.05)' }, { offset: 1, color: 'rgba(44,122,84,.30)' }] } },
+          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: alpha(C.down, .05) }, { offset: 1, color: alpha(C.down, .30) }] } },
         })],
         unit: '%', legend: false,
         rankValues: [pts.map((p) => p[1])],
@@ -876,7 +901,7 @@
           barCategoryGap: '22%',
           data: pts.map((p) => ({
             value: p[1],
-            itemStyle: { color: p[1] >= 0 ? C.up : '#b9b2a1', borderRadius: p[1] >= 0 ? [2, 2, 0, 0] : [0, 0, 2, 2] },
+            itemStyle: { color: p[1] >= 0 ? C.up : C.dim, borderRadius: p[1] >= 0 ? [2, 2, 0, 0] : [0, 0, 2, 2] },
           })),
         }],
         unit: '%', legend: false,
@@ -900,7 +925,7 @@
             return {
               value: p[1],
               itemStyle: {
-                color: p[1] >= 0 ? C.up : '#b9b2a1',
+                color: p[1] >= 0 ? C.up : C.dim,
                 opacity: prov ? 0.45 : 1,
                 borderRadius: p[1] >= 0 ? [2, 2, 0, 0] : [0, 0, 2, 2],
               },
@@ -920,8 +945,8 @@
          按 |v| 逐格选字色：浅底用墨字（白描边保底），深底用白字（深描边保底），
          阈值 0.4：当前数据里 0.48/0.74/0.84/1 走白字，其余走墨字。 */
       const heatLabel = (v) => (Math.abs(v) < 0.4
-        ? { color: '#1f1a12', textBorderColor: 'rgba(255,255,255,.7)', textBorderWidth: 1 }
-        : { color: '#fff', textBorderColor: 'rgba(60,50,35,.55)', textBorderWidth: 1 });
+        ? { color: C.ink, textBorderColor: alpha(C.card, .7), textBorderWidth: 1 }
+        : { color: C.card, textBorderColor: alpha(C.ink, .55), textBorderWidth: 1 });
       const o = baseOption({
         series: [{
           name: '相关系数',
@@ -937,29 +962,29 @@
             fontWeight: 500,
             formatter: (p) => p.value[2].toFixed(3).replace('1.000', '1'),
           },
-          itemStyle: { borderColor: '#f7f3ea', borderWidth: 2 },
-          emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,.35)' } },
+          itemStyle: { borderColor: C.card, borderWidth: 2 },
+          emphasis: { itemStyle: { shadowBlur: 8, shadowColor: alpha(C.ink, .35) } },
         }],
         legend: false,
       });
       o.xAxis = {
         type: 'category', data: d.assets,
-        axisLabel: { interval: 0, rotate: 24, fontSize: 11, color: '#5c5546' },
+        axisLabel: { interval: 0, rotate: 24, fontSize: 11, color: C.ink2 },
         axisLine: { show: false }, axisTick: { show: false },
       };
       o.yAxis = {
         type: 'category', data: [...d.assets].reverse(),
-        axisLabel: { fontSize: 11, color: '#5c5546' },
+        axisLabel: { fontSize: 11, color: C.ink2 },
         axisLine: { show: false }, axisTick: { show: false },
       };
       // y 轴翻转已在 data 里处理，这里不再重排
       o.visualMap = {
         min: d.vmin, max: d.vmax, show: false, calculable: false,
-        inRange: { color: ['#2f6db3', '#f7f3ea', '#b03a2e'] },
+        inRange: { color: [C.blue, C.card, C.up] },
       };
       o.tooltip = {
         trigger: 'item',
-        backgroundColor: 'rgba(255,255,255,.97)',
+        backgroundColor: C.card,
         borderColor: C.line,
         borderWidth: 1,
         padding: [8, 11],
@@ -973,7 +998,8 @@
 
     asset_returns(el2, d) {
       const wins = d.windows;
-      const colors = [C.goldBright, '#95a7bb', '#5f7fa3', '#a98a6b', '#c3b49a', '#d8d2c4', '#7fa89b'];
+      const colors = [C.goldBright, tok('--series-4'), tok('--series-3'), tok('--series-5'),
+        C.muted, C.dim, tok('--jade-f')];
       const series = d.rows.map((row, ri) => ({
         name: row.name,
         type: 'bar',
@@ -1009,9 +1035,9 @@
           itemStyle: { color: C.ink2 },
           lineStyle: { width: 1, color: C.ink2 },
           areaStyle: { origin: 0, color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [{ offset: 0, color: 'rgba(184,148,46,.34)' },
-                         { offset: 0.5, color: 'rgba(184,148,46,.16)' },
-                         { offset: 1, color: 'rgba(184,148,46,.34)' }] } },
+            colorStops: [{ offset: 0, color: alpha(C.gold, .34) },
+                         { offset: 0.5, color: alpha(C.gold, .16) },
+                         { offset: 1, color: alpha(C.gold, .34) }] } },
           markArea: undefined,
           markLine: (() => {
             const zero = { yAxis: 0, lineStyle: { color: C.muted, type: 'solid', width: 1 }, label: { show: false } };
@@ -1019,14 +1045,14 @@
               yAxis: y, lineStyle: { color, type: 'dotted', width: 1 },
               // 白底托一下：标签所在高度上总会有线穿过去，不托底就看不清
               label: { formatter: text, color, fontSize: 10, position: pos,
-                       backgroundColor: 'rgba(255,255,255,.82)', padding: [1, 2] },
+                       backgroundColor: C.card, padding: [1, 2] },
             });
             // 有统计锚就用它（阈值随品种走，语义不变：拉伸 / 超跌）
             if (!b) return { symbol: 'none', silent: true, animation: false,
               data: [zero, dot(10, C.up, '拉伸 +10%', 'insideEndTop'), dot(-10, C.down, '超跌 -10%', 'insideEndBottom')] };
             return { symbol: 'none', silent: true, animation: false, data: [
               zero,
-              { yAxis: b.mean, lineStyle: { color: '#6f6350', type: 'dashed', width: 1 }, label: { show: false } },
+              { yAxis: b.mean, lineStyle: { color: C.muted, type: 'dashed', width: 1 }, label: { show: false } },
               dot(b.up, C.up, '拉伸 ' + f(b.up), 'insideEndTop'),
               dot(b.dn, C.down, '超跌 ' + f(b.dn), 'insideEndBottom'),
             ] };
@@ -1058,14 +1084,14 @@
       const b = d.bands;
       const oz = (v) => (v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
       const marks = b ? [
-        { yAxis: b.mean, lineStyle: { color: '#6f6350', type: 'solid', width: 1.5 }, label: { show: false } },
+        { yAxis: b.mean, lineStyle: { color: C.muted, type: 'solid', width: 1.5 }, label: { show: false } },
         { yAxis: b.up, lineStyle: { color: C.up, type: 'dotted', width: 1 }, label: { formatter: '拉伸 ' + oz(b.up) + ' 盎司', color: C.up, fontSize: 10, position: 'insideEndTop' } },
         { yAxis: b.dn, lineStyle: { color: C.down, type: 'dotted', width: 1 }, label: { formatter: '超跌 ' + oz(b.dn) + ' 盎司', color: C.down, fontSize: 10, position: 'insideEndBottom' } },
       ] : null;
       const series = [lineSeries(r.name, r.points, {
         data: timeData(r.points), itemStyle: { color: C.goldBright },
         lineStyle: { width: 1.8 },
-        areaStyle: { color: 'rgba(212,168,83,.10)' },
+        areaStyle: { color: alpha(C.goldBright, .10) },
         markLine: marks ? { symbol: 'none', silent: true, animation: false, data: marks } : undefined,
       })];
       const o = baseOption({
@@ -1082,7 +1108,7 @@
         series: [lineSeries('金油比', pts, {
           itemStyle: { color: C.teal },
           lineStyle: { width: 1.5 },
-          areaStyle: { color: 'rgba(47,111,106,.12)' },
+          areaStyle: { color: alpha(C.teal, .12) },
           markLine: {
             symbol: 'none', silent: true, animation: false,
             data: [{
@@ -1150,9 +1176,9 @@
       lineStyle: { color, type, width: w }, label: { show: false },
     });
     return [
-      item(b.mean, '#6f6350', 'solid', 1.5),
-      item(b.up, '#a89f8d', 'dotted', 1.25),
-      item(b.dn, '#a89f8d', 'dotted', 1.25),
+      item(b.mean, C.muted, 'solid', 1.5),
+      item(b.up, C.dim, 'dotted', 1.25),
+      item(b.dn, C.dim, 'dotted', 1.25),
     ];
   }
 
@@ -1169,8 +1195,8 @@
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(212,168,83,.24)' },
-              { offset: 1, color: 'rgba(212,168,83,0)' },
+              { offset: 0, color: alpha(C.goldBright, .24) },
+              { offset: 1, color: alpha(C.goldBright, 0) },
             ],
           },
         },

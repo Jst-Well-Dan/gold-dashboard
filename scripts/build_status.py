@@ -265,6 +265,9 @@ def _group_block(group: str, rows: list[str]) -> str:
 def build() -> Path:
     now = now_utc()
     template = (WEB / "status_template.html").read_text(encoding="utf-8")
+    # 主题与主看板同一份（站点仓库同步过来的 web/theme.css + web/theme.js）
+    theme_css = (WEB / "theme.css").read_text(encoding="utf-8")
+    theme_js = (WEB / "theme.js").read_text(encoding="utf-8")
 
     payload = None
     if MANIFEST.exists():
@@ -322,6 +325,8 @@ def build() -> Path:
         groups = "\n".join(blocks)
 
     html_out = (template
+                .replace("{{THEME}}", theme_css)
+                .replace("{{THEMEJS}}", theme_js)
                 .replace("{{SUBTITLE}}", subtitle)
                 .replace("{{STATS}}", stats)
                 .replace("{{ALERT}}", alert)

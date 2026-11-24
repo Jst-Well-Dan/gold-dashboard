@@ -24,13 +24,20 @@
   const INNER = W - PAD * 2;          // 968
   const MAXPICK = 18;                 // 小红书单篇图片上限
 
+  /* 图卡用同一套令牌：canvas 的 fillStyle/strokeStyle 认 oklch() 与 color-mix()，
+     所以不需要像 ECharts 那样先转成 rgb。明暗切档会 reload，这份取值不用重算。 */
+  const CSS_ = getComputedStyle(document.documentElement);
+  const tok = (name, fallback) => CSS_.getPropertyValue(name).trim() || fallback;
   const T = {
-    paper: '#f7f5f0', card: '#ffffff', ink: '#1f1a12', ink2: '#4b4437',
-    muted: '#8a8375', line: '#e6ddc9', gold: '#a8892a', goldBright: '#d4a853',
-    goldSoft: '#e9d7a6', up: '#b8402f', down: '#2c7a54', warn: '#b8791a',
+    paper: tok('--paper', '#f7f5f0'), card: tok('--card', '#fffdf8'),
+    ink: tok('--ink', '#1c1712'), ink2: tok('--ink-2', '#4a433a'),
+    muted: tok('--muted', '#6f685c'), line: tok('--line', '#e4ddcf'),
+    gold: tok('--brand', '#835a18'), goldBright: tok('--brand-f', '#bd8f4e'),
+    goldSoft: tok('--gold-soft', '#f0dfb4'), up: tok('--up', '#924c44'),
+    down: tok('--down', '#29734e'), warn: tok('--guide', '#835a18'),
   };
-  const SANS = '"PingFang SC","Noto Sans SC","Microsoft YaHei",Inter,sans-serif';
-  const MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  const SANS = tok('--font-sans', '"PingFang SC","Microsoft YaHei",sans-serif');
+  const MONO = tok('--font-mono', 'ui-monospace,Menlo,Consolas,monospace');
 
   const toneColor = (t) => (t === 'good' ? T.up : t === 'bad' ? T.down : t === 'warn' ? T.warn : T.ink2);
   const verdictTone = (v) => {

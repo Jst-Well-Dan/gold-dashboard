@@ -16,6 +16,11 @@ def build() -> Path:
     payload = json_read(DATA / "board.json")
     template = (WEB / "template.html").read_text(encoding="utf-8")
     css = (WEB / "board.css").read_text(encoding="utf-8")
+    # 主题（色板/字体/涨跌语义）来自 Dan's Investment Dashboard，由
+    # 站点仓库的 scripts/sync_board_theme.py 同步成 web/theme.css + web/theme.js。
+    # 它必须排在 board.css 之前：后者的所有 var(--…) 都靠它定义。
+    theme_css = (WEB / "theme.css").read_text(encoding="utf-8")
+    theme_js = (WEB / "theme.js").read_text(encoding="utf-8")
     js = (WEB / "board.js").read_text(encoding="utf-8")
     export_js = (WEB / "export.js").read_text(encoding="utf-8")
     echarts = (WEB / "vendor" / "echarts.min.js").read_text(encoding="utf-8")
@@ -24,6 +29,8 @@ def build() -> Path:
     sources = "\n".join(f"<li>{s}</li>" for s in payload.get("sources", []))
 
     html = (template
+            .replace("{{THEME}}", theme_css)
+            .replace("{{THEMEJS}}", theme_js)
             .replace("{{CSS}}", css)
             .replace("{{ECHARTS}}", echarts)
             .replace("{{PAYLOAD}}", payload_js)
@@ -43,9 +50,9 @@ def build() -> Path:
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>黄金研究看板</title>
 <meta http-equiv="refresh" content="0; url=docs/index.html">
-<style>body{background:#1f1a12;color:#d4a853;font:15px/1.7 Inter,"PingFang SC",sans-serif;
+<style>body{background:#17130e;color:#bd8f4e;font:15px/1.7 -apple-system,"PingFang SC",sans-serif;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
-a{color:#f0dfb4}</style></head>
+a{color:#ece6da}</style></head>
 <body><div><p>正在打开黄金研究看板…</p>
 <p><a href="docs/index.html">如果没有自动跳转，点这里</a></p></div>
 <script>location.replace("docs/index.html");</script></body></html>
